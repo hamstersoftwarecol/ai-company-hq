@@ -1,3 +1,4 @@
+import asyncio
 import os
 import pytest
 from unittest.mock import patch, AsyncMock
@@ -22,13 +23,33 @@ async def test_health_returns_ok():
 @pytest.mark.asyncio
 async def test_post_task_returns_task_id():
     from httpx import AsyncClient, ASGITransport
-    with patch("main.process_instruction", new=AsyncMock(return_value="done")), \
-         patch("main.route_task", return_value=[]):
+    with patch("main.process_instruction", new=AsyncMock(return_value="done")):
         from main import app
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/task", json={"instruction": "Build a landing page"})
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/task", json={"instruction": "Build a landing page"})
     assert resp.status_code == 200
     assert "task_id" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_post_task_with_crew_dispatches_directly():
+    from httpx import AsyncClient, ASGITransport
+    with patch("main.dispatch_to_crew", new=AsyncMock(return_value="done")) as dispatch:
+        from main import app
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/task", json={"instruction": "Diseña la API", "crew": "backend"})
+        await asyncio.sleep(0.05)
+    assert resp.status_code == 200
+    dispatch.assert_awaited_once_with("backend", "Diseña la API")
+
+
+@pytest.mark.asyncio
+async def test_post_task_unknown_crew_returns_400():
+    from httpx import AsyncClient, ASGITransport
+    from main import app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/task", json={"instruction": "x", "crew": "nope"})
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
