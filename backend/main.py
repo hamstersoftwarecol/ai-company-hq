@@ -7,7 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from config import get_settings
+from config import get_settings, save_api_keys
 from events.ws_manager import ws_manager
 from orchestrator.ceo_agent import process_instruction
 from orchestrator.task_router import route_task
@@ -20,7 +20,7 @@ from crews.planning_crew import PlanningCrew
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_settings()  # fail fast on missing API keys
+    # Keys may be absent at startup; user can configure via /settings endpoint
     yield
 
 
@@ -50,9 +50,37 @@ class TaskRequest(BaseModel):
     instruction: str
 
 
+class SettingsRequest(BaseModel):
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/settings")
+async def get_settings_status() -> dict:
+    import os
+    ant = os.getenv("ANTHROPIC_API_KEY", "")
+    oai = os.getenv("OPENAI_API_KEY", "")
+    # Placeholders in .env.example / default files are not real keys
+    _PLACEHOLDERS = {"", "sk-ant-...", "sk-...", "your-key-here"}
+    ant_ok = bool(ant and ant not in _PLACEHOLDERS and len(ant) > 20)
+    oai_ok = bool(oai and oai not in _PLACEHOLDERS and len(oai) > 20)
+    return {
+        "anthropic_configured": ant_ok,
+        "openai_configured": oai_ok,
+        "anthropic_key_hint": f"{ant[:10]}..." if ant_ok else "",
+        "openai_key_hint": f"{oai[:8]}..." if oai_ok else "",
+    }
+
+
+@app.post("/settings")
+async def update_settings(body: SettingsRequest) -> dict:
+    save_api_keys(body.anthropic_api_key, body.openai_api_key)
+    return {"status": "saved"}
 
 
 @app.get("/agents")
@@ -101,6 +129,8 @@ async def _run_task(task_id: str, instruction: str) -> None:
             if entry["task_id"] == task_id:
                 entry["status"] = "complete"
     except Exception as exc:
+        import logging
+        logging.exception("Task %s failed: %s", task_id, exc)
         for entry in task_history:
             if entry["task_id"] == task_id:
                 entry["status"] = "error"

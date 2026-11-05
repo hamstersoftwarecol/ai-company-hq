@@ -7,6 +7,7 @@ import { AgentsGrid } from "@/components/AgentsGrid";
 import { CommandInput } from "@/components/CommandInput";
 import { LiveLog } from "@/components/LiveLog";
 import { StatusBar } from "@/components/StatusBar";
+import SettingsPanel from "@/components/SettingsPanel";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
 
@@ -20,6 +21,7 @@ export default function DashboardPage() {
   const { events, agentStates, isConnected } = useWebSocket(WS_URL);
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
 
   async function handleSubmit(instruction: string) {
     setSubmitting(true);
@@ -38,9 +40,20 @@ export default function DashboardPage() {
 
   return (
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+
       {/* Left sidebar */}
       <aside className="w-72 flex flex-col border-r border-white/10 shrink-0">
-        <StatusBar agentStates={agentStates} isConnected={isConnected} />
+        <div className="flex items-center justify-between pr-2">
+          <StatusBar agentStates={agentStates} isConnected={isConnected} />
+          <button
+            onClick={() => setShowSettings(true)}
+            title="Configurar API keys"
+            className="shrink-0 text-white/40 hover:text-white/80 transition-colors text-base px-2"
+          >
+            ⚙️
+          </button>
+        </div>
         <CommandInput onSubmit={handleSubmit} disabled={submitting} />
         <div className="flex-1 overflow-y-auto px-4 pb-4">
           <p className="text-xs font-medium text-gray-500 mb-2">Historial</p>
