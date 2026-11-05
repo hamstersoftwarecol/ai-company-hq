@@ -34,3 +34,36 @@ export async function sendAnswers(taskId: string, answers: Record<string, string
   }
   return res.json();
 }
+
+export interface FolderListing {
+  path: string;
+  home: string;
+  parent: string | null;
+  folders: { name: string; path: string }[];
+}
+
+async function failWith(res: Response): Promise<never> {
+  let detail = `HTTP ${res.status}`;
+  try {
+    detail = (await res.json()).detail ?? detail;
+  } catch {}
+  throw new Error(detail);
+}
+
+/** Sub-folders of `path` (default: the user's home) for the folder picker. */
+export async function listFolders(path?: string): Promise<FolderListing> {
+  const res = await fetch(`${API_URL}/folders${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+  if (!res.ok) return failWith(res);
+  return res.json();
+}
+
+/** Create `name` inside `parent` and return its absolute path. */
+export async function createFolder(parent: string, name: string): Promise<{ path: string }> {
+  const res = await fetch(`${API_URL}/folders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parent, name }),
+  });
+  if (!res.ok) return failWith(res);
+  return res.json();
+}

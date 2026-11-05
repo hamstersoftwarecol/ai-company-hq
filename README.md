@@ -13,11 +13,13 @@ Una oficina virtual en pixel art, con estilo de videojuego en modo claro, para d
   - **Error:** monitor con `!` y globo `!`.
 - **Darle una tarea a un agente concreto.** Haz clic en él (en la oficina o en la lista *Equipo*), escribe la tarea y pulsa **ENVIAR**. La tarea va directa a ese equipo.
 - **Dejar que el CEO decida.** Con el CEO seleccionado, él elige qué equipos hacen falta y reparte el trabajo.
-- **Responder las preguntas antes de empezar.** Antes de trabajar, el CEO te hace hasta 3 preguntas de aclaración sobre tu tarea y **siempre** te pregunta en qué carpeta se desarrollará el proyecto. Si asignas la tarea directo a un agente, te pregunta la carpeta. La tarea espera a que respondas, y la tarjeta de preguntas sigue ahí aunque recargues la página.
+- **Responder las preguntas antes de empezar.** Antes de trabajar, el CEO te hace hasta 3 preguntas de aclaración sobre tu tarea y **siempre** te pregunta en qué carpeta se desarrollará el proyecto. Si asignas la tarea directo a un agente, te pregunta la carpeta. La tarea espera a que respondas, y la tarjeta de preguntas sigue ahí aunque recargues la página. Para la carpeta, pulsa **ELEGIR…**: un explorador te deja navegar por tus carpetas, crear una nueva y elegirla, sin escribir la ruta.
 - **Seguir todo en el panel de control.** Modelo en uso, tarea actual, último resultado, registro de actividad y tareas enviadas.
 - **Usarlo desde el móvil.** El diseño se apila en una sola columna.
 
 ![Preguntas del CEO antes de empezar](docs/images/office-questions.png)
+
+<img src="docs/images/office-folder-picker.png" alt="Selector de carpetas" width="480">
 
 ![Agentes trabajando](docs/images/office-working.png)
 
@@ -117,6 +119,7 @@ El repositorio incluye un servidor MCP por stdio ([`.mcp.json`](.mcp.json)) que 
 | `GET` | `/agents` | Estado actual de los agentes. |
 | `GET` | `/history` | Tareas enviadas. |
 | `POST` | `/task` | `{ "instruction": "...", "crew": "backend" }`. Sin `crew`, lo gestiona el CEO. La tarea queda esperando tus respuestas. |
+| `GET` / `POST` | `/folders` | Explorador de carpetas (solo dentro de `~`): lista subcarpetas, o crea una nueva con `{ "parent": "...", "name": "..." }`. |
 | `GET` | `/pending` | Tareas que esperan respuestas. |
 | `POST` | `/task/{id}/answers` | `{ "answers": { "folder": "~/mi-proyecto", "q1": "..." } }`. Valida la carpeta y la crea si no existe. |
 | `WS` | `/ws` | Eventos de los agentes en tiempo real y mensajes `questions` / `questions_resolved`. |

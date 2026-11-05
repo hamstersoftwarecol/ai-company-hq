@@ -28,3 +28,32 @@ def test_rejects_existing_file(fake_home):
     (fake_home / "archivo").write_text("x")
     with pytest.raises(ValueError):
         resolve_project_dir("~/archivo")
+
+
+def test_list_folders_hides_files_hidden_and_library(fake_home):
+    from orchestrator.project import list_folders
+    for d in ("Documents", "alpha", ".ssh", "Library"):
+        (fake_home / d).mkdir()
+    (fake_home / "nota.txt").write_text("x")
+    out = list_folders()
+    assert [f["name"] for f in out["folders"]] == ["alpha", "Documents"]  # case-insensitive order
+    assert out["parent"] is None and out["path"] == str(fake_home.resolve())
+
+
+def test_list_folders_inside_home_has_parent_and_rejects_outside(fake_home):
+    from orchestrator.project import list_folders
+    (fake_home / "Documents" / "app").mkdir(parents=True)
+    out = list_folders("~/Documents")
+    assert out["parent"] == str(fake_home.resolve()) and [f["name"] for f in out["folders"]] == ["app"]
+    for bad in ("/etc", "~/Documents/../../x", "~/.ssh", "~/Library", "~/no-existe"):
+        with pytest.raises(ValueError):
+            list_folders(bad)
+
+
+def test_create_folder_and_rejects_bad_names(fake_home):
+    from orchestrator.project import create_folder
+    path = create_folder("~", "mi-app")
+    assert path == fake_home.resolve() / "mi-app" and path.is_dir()
+    for bad in ("", "  ", "a/b", "..", ".oculta", "x" * 101):
+        with pytest.raises(ValueError):
+            create_folder("~", bad)

@@ -11,6 +11,7 @@ from config import save_api_keys
 from events.ws_manager import ws_manager
 from orchestrator.ceo_agent import dispatch_to_crew, process_instruction
 from orchestrator.clarify import FOLDER_QUESTION, pending
+from orchestrator.project import create_folder, list_folders
 from mcp_servers.crew_server import get_server, set_ws_manager
 
 CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]
@@ -43,6 +44,11 @@ task_history: list[dict] = []
 class TaskRequest(BaseModel):
     instruction: str
     crew: str | None = None
+
+
+class NewFolderRequest(BaseModel):
+    parent: str
+    name: str
 
 
 class AnswersRequest(BaseModel):
@@ -98,6 +104,24 @@ async def post_task(body: TaskRequest) -> dict:
     task_id = str(uuid.uuid4())
     asyncio.create_task(_run_task(task_id, body.instruction, body.crew))
     return {"task_id": task_id}
+
+
+@app.get("/folders")
+async def get_folders(path: str | None = None) -> dict:
+    """Sub-folders of `path` (default ~) for the folder picker."""
+    try:
+        return list_folders(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/folders")
+async def post_folder(body: NewFolderRequest) -> dict:
+    """Create a new folder inside `parent` from the folder picker."""
+    try:
+        return {"path": str(create_folder(body.parent, body.name))}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/pending")

@@ -94,3 +94,18 @@ async def test_answers_with_invalid_folder_returns_400_and_valid_one_resolves(tm
         assert (tmp_path / "mi-proyecto").is_dir()
     finally:
         pending._items.pop("t1", None)
+
+
+@pytest.mark.asyncio
+async def test_folders_endpoints_list_and_create(tmp_path, monkeypatch):
+    from httpx import AsyncClient, ASGITransport
+    from main import app
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "Documents").mkdir()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        listed = (await client.get("/folders")).json()
+        assert [f["name"] for f in listed["folders"]] == ["Documents"]
+        created = await client.post("/folders", json={"parent": str(tmp_path / "Documents"), "name": "nuevo"})
+        assert created.status_code == 200 and (tmp_path / "Documents" / "nuevo").is_dir()
+        assert (await client.get("/folders", params={"path": "/etc"})).status_code == 400
+        assert (await client.post("/folders", json={"parent": "~", "name": "a/b"})).status_code == 400

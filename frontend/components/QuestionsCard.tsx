@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import FolderPicker from "@/components/FolderPicker";
 import { sendAnswers } from "@/lib/api";
 import type { PendingQuestions } from "@/types/agent";
 
@@ -14,6 +15,7 @@ export default function QuestionsCard({ pending, onAnswered }: Props) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [picking, setPicking] = useState(false);
 
   const folderQ = pending.questions.find((q) => q.kind === "folder");
   const canSend = !sending && (!folderQ || (answers[folderQ.id] ?? "").trim() !== "");
@@ -44,23 +46,42 @@ export default function QuestionsCard({ pending, onAnswered }: Props) {
       {pending.questions.map((q) => (
         <label key={q.id} className="flex flex-col gap-1">
           <span className="text-sm font-semibold">{q.question}</span>
-          <input
-            value={answers[q.id] ?? ""}
-            onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
-            placeholder={q.kind === "folder" ? "~/Documents/mi-proyecto" : "Tu respuesta"}
-            className="px-input"
-            spellCheck={false}
-          />
+          <div className="flex gap-2">
+            <input
+              value={answers[q.id] ?? ""}
+              onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+              placeholder={q.kind === "folder" ? "~/Documents/mi-proyecto" : "Tu respuesta"}
+              className="px-input"
+              spellCheck={false}
+            />
+            {q.kind === "folder" && (
+              <button type="button" onClick={() => setPicking(true)} className="px-btn px-btn-ghost shrink-0">
+                ELEGIR…
+              </button>
+            )}
+          </div>
           {q.kind === "folder" && (
             <span className="text-xs text-[#6b5d52]">
-              Debe estar dentro de tu carpeta personal. Los agentes crearán y editarán archivos ahí, y solo ahí.
+              Usa ELEGIR… para explorar tus carpetas o crear una nueva, o escribe la ruta. Debe estar dentro de tu carpeta personal; los agentes crearán y editarán archivos ahí, y solo ahí.
             </span>
           )}
         </label>
       ))}
+
+      {picking && folderQ && (
+        <FolderPicker
+          initialPath={answers[folderQ.id]}
+          onSelect={(path) => {
+            setAnswers((prev) => ({ ...prev, [folderQ.id]: path }));
+            setError("");
+            setPicking(false);
+          }}
+          onClose={() => setPicking(false)}
+        />
+      )}
 
       {error && <p className="text-sm font-medium text-red-600">{error}</p>}
       <div>
