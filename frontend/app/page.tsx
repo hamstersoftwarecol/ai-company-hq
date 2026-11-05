@@ -7,7 +7,6 @@ import { sendTask } from "@/lib/api";
 import { AGENT_BY_KEY } from "@/lib/office";
 import type { AgentKey } from "@/types/agent";
 import ControlPanel, { type HistoryEntry } from "@/components/ControlPanel";
-import SettingsPanel from "@/components/SettingsPanel";
 
 const PixelOffice = dynamic(() => import("@/components/PixelOffice"), { ssr: false });
 
@@ -20,7 +19,6 @@ export default function OfficePage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [showSettings, setShowSettings] = useState(false);
 
   const target = AGENT_BY_KEY[selected];
   const working = Object.values(agentStates).filter((s) => s.status === "working").length;
@@ -46,8 +44,6 @@ export default function OfficePage() {
 
   return (
     <div className="min-h-screen">
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-
       <header className="flex flex-wrap items-center gap-3 border-b-[3px] border-[#3a2f2a] bg-[#ffcf6b] px-4 py-3">
         <h1 className="font-pixel text-[11px] leading-snug sm:text-sm">MI OFICINA VIRTUAL HAMSTER SOFTWARE</h1>
         <span
@@ -65,13 +61,6 @@ export default function OfficePage() {
             {working} TRABAJANDO
           </span>
         )}
-        <button
-          type="button"
-          onClick={() => setShowSettings(true)}
-          className="px-btn px-btn-ghost ml-auto"
-        >
-          AJUSTES
-        </button>
       </header>
 
       <main className="mx-auto grid max-w-[1400px] gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(0,1fr)_380px]">

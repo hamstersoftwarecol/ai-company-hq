@@ -76,7 +76,7 @@ Abre <http://localhost:3000>.
 
 **3. API keys**
 
-Pulsa **AJUSTES** en la cabecera y pega tus keys. Se guardan en `backend/.env`, que está en `.gitignore`. También puedes crear ese archivo a mano:
+Crea `backend/.env` (está en `.gitignore`) con tus keys y reinicia el backend:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
@@ -97,7 +97,7 @@ El repositorio incluye un servidor MCP por stdio ([`.mcp.json`](.mcp.json)) que 
 | Método | Ruta | Descripción |
 | --- | --- | --- |
 | `GET` | `/health` | Comprueba que el backend está vivo. |
-| `GET` / `POST` | `/settings` | Consulta o guarda las API keys. |
+| `GET` / `POST` | `/settings` | Consulta o guarda las API keys (sin pantalla en la interfaz; se editan en `backend/.env`). |
 | `GET` | `/agents` | Estado actual de los agentes. |
 | `GET` | `/history` | Tareas enviadas. |
 | `POST` | `/task` | `{ "instruction": "...", "crew": "backend" }`. Sin `crew`, lo gestiona el CEO. |
@@ -115,7 +115,7 @@ backend/
   tests/
 frontend/
   app/page.tsx         la oficina y la barra de comandos
-  components/          PixelOffice, ControlPanel, SettingsPanel
+  components/          PixelOffice, ControlPanel
   lib/office.ts        posiciones y colores de los agentes
   hooks/useWebSocket.ts
 docs/                  diseño, plan e imágenes de este README
