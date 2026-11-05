@@ -1,8 +1,14 @@
+import os
 import uuid
 import llm
 from datetime import datetime, timezone
 from events.schemas import AgentEvent
 from model_router.router import get_model_for_agent
+
+
+# Keep agent answers short: long answers are slow, and in a multi-crew run they
+# are fed to the other crews as context.
+MAX_WORDS = int(os.environ.get("AGENT_MAX_WORDS", "400"))
 
 
 class BaseCrew:
@@ -37,7 +43,10 @@ class BaseCrew:
             response = await llm.acompletion(
                 model=model,
                 messages=[
-                    {"role": "system", "content": role},
+                    {"role": "system", "content": (
+                        f"{role}\n\nBe concise and actionable: answer in at most {MAX_WORDS} words, "
+                        "no preamble, no repetition."
+                    )},
                     {"role": "user", "content": task},
                 ],
             )

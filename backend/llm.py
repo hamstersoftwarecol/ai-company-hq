@@ -85,7 +85,7 @@ async def _call_ollama(model: str, messages: list[dict], **kwargs: Any) -> _Resp
             return _Response(data["message"]["content"])
 
 
-_CLAUDE_CODE_TIMEOUT = 300
+_CLAUDE_CODE_TIMEOUT = int(os.environ.get("CLAUDE_CODE_TIMEOUT", "600"))
 
 
 async def _call_claude_code(model: str, messages: list[dict], **kwargs: Any) -> _Response:
