@@ -20,7 +20,7 @@ const pressStart = Press_Start_2P({
 });
 
 export const metadata: Metadata = {
-  title: "Oficina Virtual · AI Company HQ",
+  title: "Mi Oficina Virtual · Hamster Software",
   description: "Oficina virtual para dirigir a tus agentes de IA",
 };
 

@@ -49,7 +49,7 @@ export default function OfficePage() {
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
       <header className="flex flex-wrap items-center gap-3 border-b-[3px] border-[#3a2f2a] bg-[#ffcf6b] px-4 py-3">
-        <h1 className="font-pixel text-[11px] leading-snug sm:text-sm">MI OFICINA VIRTUAL</h1>
+        <h1 className="font-pixel text-[11px] leading-snug sm:text-sm">MI OFICINA VIRTUAL HAMSTER SOFTWARE</h1>
         <span
           className="font-pixel inline-flex items-center gap-2 border-2 border-[#3a2f2a] bg-white px-2 py-1.5 text-[8px]"
           title={isConnected ? "Conectado al backend" : "Sin conexión con el backend"}
