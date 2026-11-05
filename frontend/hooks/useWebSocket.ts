@@ -1,20 +1,17 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { AgentEvent, AgentState, CrewName } from "@/types/agent";
+import type { AgentEvent, AgentKey, AgentState } from "@/types/agent";
 
-const DEFAULT_STATES: Record<CrewName, AgentState> = {
-  marketing: { crew: "marketing", status: "idle", currentTask: "", lastOutput: "", modelUsed: "" },
-  frontend:  { crew: "frontend",  status: "idle", currentTask: "", lastOutput: "", modelUsed: "" },
-  backend:   { crew: "backend",   status: "idle", currentTask: "", lastOutput: "", modelUsed: "" },
-  mobile:    { crew: "mobile",    status: "idle", currentTask: "", lastOutput: "", modelUsed: "" },
-  images:    { crew: "images",    status: "idle", currentTask: "", lastOutput: "", modelUsed: "" },
-  planning:  { crew: "planning",  status: "idle", currentTask: "", lastOutput: "", modelUsed: "" },
-};
+const KEYS: AgentKey[] = ["orchestrator", "marketing", "frontend", "backend", "mobile", "images", "planning"];
+
+const DEFAULT_STATES = Object.fromEntries(
+  KEYS.map((k) => [k, { crew: k, status: "idle", currentTask: "", lastOutput: "", modelUsed: "" }])
+) as Record<AgentKey, AgentState>;
 
 export function useWebSocket(url: string) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [agentStates, setAgentStates] = useState<Record<CrewName, AgentState>>(DEFAULT_STATES);
+  const [agentStates, setAgentStates] = useState<Record<AgentKey, AgentState>>(DEFAULT_STATES);
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -30,11 +27,12 @@ export function useWebSocket(url: string) {
     ws.onmessage = (e) => {
       try {
         const event: AgentEvent = JSON.parse(e.data);
+        if (!KEYS.includes(event.crew as AgentKey)) return;
         setEvents((prev) => [...prev.slice(-199), event]);
         setAgentStates((prev) => ({
           ...prev,
-          [event.crew as CrewName]: {
-            crew: event.crew as CrewName,
+          [event.crew]: {
+            crew: event.crew as AgentKey,
             status: event.status,
             currentTask: event.task,
             lastOutput: event.output,

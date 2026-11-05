@@ -41,13 +41,20 @@ async def process_instruction(instruction: str, ws_manager: WSManager) -> str:
     )
 
     # Step 1: CEO decides which crews to involve
-    response = await llm.acompletion(
-        model=model,
-        messages=[
-            {"role": "system", "content": _CEO_SYSTEM},
-            {"role": "user", "content": instruction},
-        ],
-    )
+    try:
+        response = await llm.acompletion(
+            model=model,
+            messages=[
+                {"role": "system", "content": _CEO_SYSTEM},
+                {"role": "user", "content": instruction},
+            ],
+        )
+    except Exception as exc:
+        await base.emit_event(
+            agent="ceo_agent", status="error",
+            task=instruction, output=str(exc), model_used=model,
+        )
+        raise
     plan_text = response.choices[0].message.content or "[]"
 
     # Parse JSON plan
@@ -69,19 +76,22 @@ async def process_instruction(instruction: str, ws_manager: WSManager) -> str:
     )
 
     # Step 2: Dispatch to crews via MCP
-    server = get_server()
     results: list[str] = []
-    async with Client(server) as client:
-        for item in pairs:
-            crew_name = item.get("crew", "")
-            subtask   = item.get("task", instruction)
-            if crew_name not in CREW_NAMES:
-                continue
-            tool_result = await client.call_tool(crew_name, {"task": subtask})
-            # tool_result is a list of content items
-            text = " ".join(
-                c.text for c in tool_result if hasattr(c, "text")
-            )
-            results.append(f"[{crew_name}] {text[:300]}")
+    for item in pairs:
+        crew_name = item.get("crew", "")
+        subtask   = item.get("task", instruction)
+        if crew_name not in CREW_NAMES:
+            continue
+        text = await dispatch_to_crew(crew_name, subtask)
+        results.append(f"[{crew_name}] {text[:300]}")
 
     return "\n\n".join(results) or plan_text
+
+
+async def dispatch_to_crew(crew: str, task: str) -> str:
+    """Call one crew's MCP tool directly (used by the CEO and by direct assignment)."""
+    if crew not in CREW_NAMES:
+        raise ValueError(f"Unknown crew: {crew}")
+    async with Client(get_server()) as client:
+        result = await client.call_tool(crew, {"task": task})
+    return " ".join(c.text for c in result.content if hasattr(c, "text"))

@@ -1,501 +1,400 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { AgentState } from "@/types/agent";
+import type { AgentKey, AgentState, AgentStatus } from "@/types/agent";
+import { AGENTS, OFFICE_H, OFFICE_W, type OfficeAgent } from "@/lib/office";
 
-// ── Palette ─────────────────────────────────────────────────────────────
-const C = {
-  wall:     "#2d2d3a",
-  wallDark: "#1a1a26",
-  floor1:   "#b8956a",
-  floor2:   "#a07d58",
-  floorGray:"#8a8a9e",
-  floorGray2:"#7a7a8e",
-  carpet1:  "#4a5a8c",
-  carpet2:  "#3d4f7a",
-  wood1:    "#c4915a",
-  wood2:    "#b07d48",
-  desk:     "#6b4a2a",
-  deskTop:  "#8b6a3a",
-  monitor:  "#1a1a2e",
-  screen:   "#0d1b2a",
-  chair:    "#2d4a6b",
-  chairDark:"#1f3550",
-  plant:    "#2d6b3a",
-  plantDark:"#1f4f28",
-  pot:      "#8b5a2a",
-  sofa:     "#4a3a6b",
-  sofaDark: "#352a50",
-  serverRack:"#2a3a4a",
-  serverLight:"#00ff88",
-  bookshelf:"#5a3a1a",
-  window:   "#6ab4d4",
-  windowFr: "#4a2a0a",
-  meeting:  "#2a4a5a",
-  table:    "#3a2a1a",
-  neonBlue: "#00f5ff",
-  neonPink: "#ff006e",
-  neonPurp: "#8338ec",
+// ── Light "game" palette ───────────────────────────────────────────────────
+const P = {
+  floorA: "#efeff3",
+  floorB: "#e3e3ea",
+  carpetA: "#f3ead6",
+  carpetB: "#ebdfc3",
+  wall: "#f7f2e8",
+  wallTrim: "#d8ccb6",
+  orange: "#f08a24",
+  orangeTop: "#ffb454",
+  orangeDark: "#c96a10",
+  desk: "#9a7260",
+  deskTop: "#b8917b",
+  deskFront: "#7a5848",
+  outline: "#3a2f2a",
+  monitor: "#2f3340",
+  chair: "#6b7280",
+  yellow: "#f7d51d",
+  yellowDark: "#d9b50c",
+  green: "#2f9e57",
+  plant: "#4cc36d",
+  plantDark: "#2f8f4e",
+  pot: "#c8754b",
+  potDark: "#a85c38",
+  metal: "#b9c6d4",
+  metalDark: "#7d8da0",
+  white: "#ffffff",
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────
-function px(x: number) { return Math.round(x); }
+type Ctx = CanvasRenderingContext2D;
 
-function rect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, fill: string, stroke?: string) {
+function R(ctx: Ctx, x: number, y: number, w: number, h: number, fill: string) {
   ctx.fillStyle = fill;
-  ctx.fillRect(px(x), px(y), px(w), px(h));
-  if (stroke) {
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px(x) + 0.5, px(y) + 0.5, px(w) - 1, px(h) - 1);
+  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+}
+
+function box(ctx: Ctx, x: number, y: number, w: number, h: number, fill: string, edge = P.outline) {
+  R(ctx, x, y, w, h, edge);
+  R(ctx, x + 1, y + 1, w - 2, h - 2, fill);
+}
+
+// ── Decor ──────────────────────────────────────────────────────────────────
+function plant(ctx: Ctx, x: number, y: number) {
+  box(ctx, x + 2, y + 10, 8, 7, P.pot, P.potDark);
+  R(ctx, x, y + 3, 12, 8, P.plantDark);
+  R(ctx, x + 1, y + 1, 10, 7, P.plant);
+  R(ctx, x + 3, y - 2, 6, 5, P.plant);
+}
+
+function fileCabinet(ctx: Ctx, x: number, y: number) {
+  box(ctx, x, y, 16, 26, P.metal, P.metalDark);
+  for (let i = 0; i < 3; i++) {
+    R(ctx, x + 2, y + 2 + i * 8, 12, 6, "#c9d4e0");
+    R(ctx, x + 6, y + 4 + i * 8, 4, 2, "#f2c230");
   }
 }
 
-function tile(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, c1: string, c2: string, size = 8) {
-  ctx.fillStyle = c1;
-  ctx.fillRect(px(x), px(y), px(w), px(h));
-  ctx.fillStyle = c2;
-  for (let ty = 0; ty < h; ty += size) {
-    for (let tx = (ty / size % 2 === 0) ? 0 : size; tx < w; tx += size * 2) {
-      ctx.fillRect(px(x + tx), px(y + ty), px(size), px(size));
+function windowPane(ctx: Ctx, x: number, y: number, w: number, h: number) {
+  box(ctx, x, y, w, h, "#bfe3ff", "#8aa2b8");
+  R(ctx, x + w / 2 - 1, y + 1, 2, h - 2, "#8aa2b8");
+  R(ctx, x + 1, y + h / 2 - 1, w - 2, 2, "#8aa2b8");
+  R(ctx, x + 3, y + 3, 4, 2, "#ffffff");
+}
+
+function snackMachine(ctx: Ctx, x: number, y: number) {
+  box(ctx, x, y, 26, 32, "#e04646", "#8f1f1f");
+  R(ctx, x + 3, y + 3, 14, 20, "#2a2f3a");
+  const cols = ["#ffd166", "#06d6a0", "#ef476f", "#118ab2", "#ffffff"];
+  for (let r = 0; r < 4; r++)
+    for (let c = 0; c < 3; c++) R(ctx, x + 4 + c * 4.5, y + 4 + r * 5, 3, 3, cols[(r + c) % cols.length]);
+  R(ctx, x + 19, y + 5, 4, 8, "#8f1f1f");
+  R(ctx, x + 4, y + 26, 18, 3, "#8f1f1f");
+}
+
+function cooler(ctx: Ctx, x: number, y: number) {
+  box(ctx, x + 1, y + 10, 12, 14, P.white, P.metalDark);
+  box(ctx, x + 3, y, 8, 11, "#8ccbf7", "#4a8fc2");
+  R(ctx, x + 5, y + 16, 4, 2, "#4a8fc2");
+}
+
+function counter(ctx: Ctx, x: number, y: number, w: number) {
+  box(ctx, x, y, w, 16, P.white, P.metalDark);
+  R(ctx, x + w / 2, y + 2, 1, 12, P.metalDark);
+  R(ctx, x + 4, y + 5, 8, 2, "#cfd8e3");
+  R(ctx, x + w / 2 + 4, y + 5, 8, 2, "#cfd8e3");
+}
+
+function sofa(ctx: Ctx, x: number, y: number, w: number, h: number) {
+  box(ctx, x, y, w, h, P.yellow, P.yellowDark);
+  R(ctx, x + 2, y + 2, w - 4, 4, P.yellowDark);
+  const n = Math.floor(w / 18);
+  for (let i = 1; i < n; i++) R(ctx, x + (w / n) * i, y + 6, 1, h - 8, P.yellowDark);
+}
+
+function pingPong(ctx: Ctx, x: number, y: number, t: number) {
+  R(ctx, x + 3, y + 28, 3, 6, P.outline);
+  R(ctx, x + 42, y + 28, 3, 6, P.outline);
+  box(ctx, x, y, 48, 30, P.green, "#1c6b3a");
+  R(ctx, x + 2, y + 2, 44, 26, "#35b566");
+  R(ctx, x + 23, y + 1, 2, 28, P.white);
+  R(ctx, x + 2, y + 14, 44, 1, "rgba(255,255,255,0.7)");
+  const bx = 8 + ((Math.sin(t * 2.2) + 1) / 2) * 30;
+  R(ctx, x + bx, y + 12 + Math.sin(t * 4.4) * 3, 3, 3, "#fff");
+}
+
+function bookshelf(ctx: Ctx, x: number, y: number) {
+  box(ctx, x, y, 24, 30, "#a8714a", "#6e4527");
+  const cols = ["#ef5b5b", "#3b82f6", "#16a34a", "#f5b400", "#8b5cf6", "#1fb5a6"];
+  for (let s = 0; s < 3; s++) {
+    R(ctx, x + 2, y + 9 + s * 9, 20, 1, "#6e4527");
+    for (let b = 0; b < 6; b++) R(ctx, x + 3 + b * 3, y + 2 + s * 9, 2, 6, cols[(b + s) % cols.length]);
+  }
+}
+
+function poster(ctx: Ctx, x: number, y: number, c: string) {
+  box(ctx, x, y, 14, 18, P.white, P.outline);
+  R(ctx, x + 2, y + 2, 10, 8, c);
+  R(ctx, x + 2, y + 12, 10, 1, "#9ca3af");
+  R(ctx, x + 2, y + 14, 6, 1, "#9ca3af");
+}
+
+function orangeH(ctx: Ctx, x: number, y: number, w: number) {
+  R(ctx, x, y, w, 6, P.orange);
+  R(ctx, x, y, w, 2, P.orangeTop);
+  R(ctx, x, y + 6, w, 2, "rgba(0,0,0,0.08)");
+}
+function orangeV(ctx: Ctx, x: number, y: number, h: number) {
+  R(ctx, x, y, 5, h, P.orange);
+  R(ctx, x, y, 2, h, P.orangeTop);
+  R(ctx, x + 5, y, 2, h, "rgba(0,0,0,0.08)");
+}
+
+function meetingRoom(ctx: Ctx, t: number) {
+  const x = 164, y = 214, w = 196, h = 28;
+  for (let i = 0; i < 5; i++) {
+    box(ctx, x + 14 + i * 36, y - 9, 14, 9, P.chair, "#4b5563");
+    box(ctx, x + 14 + i * 36, y + h, 14, 9, P.chair, "#4b5563");
+  }
+  box(ctx, x, y, w, h, "#c9a088", P.deskFront);
+  R(ctx, x + 3, y + 3, w - 6, 2, "#d9b8a3");
+  for (let i = 0; i < 4; i++) {
+    R(ctx, x + 22 + i * 42, y + 9, 10, 7, P.white);
+    R(ctx, x + 24 + i * 42, y + 11, 6, 3, i === Math.floor(t / 2) % 4 ? "#3b82f6" : "#cbd5e1");
+  }
+}
+
+// ── Characters & desks ─────────────────────────────────────────────────────
+function drawUnit(
+  ctx: Ctx,
+  a: OfficeAgent,
+  status: AgentStatus,
+  selected: boolean,
+  t: number,
+  index: number
+) {
+  const { cx, top } = a;
+  const isCeo = a.key === "orchestrator";
+  const hw = isCeo ? 32 : 24;
+  const working = status === "working";
+  const bob = working ? 0 : Math.round(Math.sin(t * 1.6 + index) * 0.6);
+
+  // soft floor shadow
+  R(ctx, cx - hw, top + 54, hw * 2, 3, "rgba(0,0,0,0.07)");
+
+  // chair
+  box(ctx, cx - 9, top + 32, 18, 15, P.chair, "#4b5563");
+
+  // monitor(s)
+  const monitors = isCeo ? [cx - 22, cx + 2] : [cx - 12];
+  monitors.forEach((mx, mi) => {
+    box(ctx, mx, top + 6, 24, 17, P.monitor, "#14161d");
+    const sx = mx + 2, sy = top + 8, sw = 20, sh = 13;
+    let bg = "#a9bdd3";
+    if (working) bg = a.color;
+    if (status === "complete") bg = "#22c55e";
+    if (status === "error") bg = "#ef4444";
+    R(ctx, sx, sy, sw, sh, bg);
+    if (working) {
+      for (let i = 0; i < 4; i++) {
+        const len = 5 + ((Math.sin(t * 3 + i * 1.9 + mi) + 1) / 2) * 11;
+        R(ctx, sx + 2, sy + 2 + i * 3, len, 1, "rgba(255,255,255,0.9)");
+      }
+      R(ctx, sx, sy + (Math.floor(t * 10) % sh), sw, 1, "rgba(255,255,255,0.25)");
+    } else if (status === "complete") {
+      [[7, 7], [8, 8], [9, 9], [10, 8], [11, 7], [12, 6], [13, 5]].forEach(([dx, dy]) =>
+        R(ctx, sx + dx - 1, sy + dy - 1, 2, 2, P.white)
+      );
+    } else if (status === "error") {
+      R(ctx, sx + 9, sy + 2, 2, 6, P.white);
+      R(ctx, sx + 9, sy + 10, 2, 2, P.white);
+    } else {
+      for (let i = 0; i < 3; i++) R(ctx, sx + 2, sy + 3 + i * 3, 6 + ((i * 5) % 7), 1, "rgba(255,255,255,0.55)");
     }
-  }
-}
+    R(ctx, mx + 10, top + 23, 4, 3, P.monitor);
+  });
 
-function monitor(ctx: CanvasRenderingContext2D, x: number, y: number, working: boolean, color: string, t: number) {
-  rect(ctx, x, y + 2, 20, 12, C.monitor, "#000");
-  // screen glow
-  const sc = working ? color : "#0d1a2a";
-  ctx.fillStyle = sc;
-  ctx.fillRect(px(x + 2), px(y + 3), 16, 8);
-  if (working) {
-    // scanline animation
-    const line = Math.floor(t * 8) % 8;
-    ctx.fillStyle = "rgba(255,255,255,0.15)";
-    ctx.fillRect(px(x + 2), px(y + 3 + line), 16, 1);
-  }
-  rect(ctx, x + 8, y + 14, 4, 3, C.desk);
-  rect(ctx, x + 5, y + 17, 10, 2, C.desk);
-}
+  // character (body → head → hair → face)
+  const by = top + 34 + bob;
+  R(ctx, cx - 8, by, 16, 10, a.color);
+  R(ctx, cx - 8, by, 16, 2, "rgba(255,255,255,0.25)");
+  R(ctx, cx - 5, by - 9, 10, 10, a.skin);
+  R(ctx, cx - 6, by - 11, 12, 5, a.hair);
+  R(ctx, cx - 6, by - 8, 2, 4, a.hair);
+  R(ctx, cx + 4, by - 8, 2, 4, a.hair);
+  const blink = Math.floor(t * 1.2 + index * 3) % 7 === 0;
+  R(ctx, cx - 3, by - 5, 2, blink ? 1 : 2, P.outline);
+  R(ctx, cx + 1, by - 5, 2, blink ? 1 : 2, P.outline);
+  R(ctx, cx - 1, by - 1, 3, 1, status === "error" ? "#b91c1c" : "#b9704f");
+  if (isCeo) R(ctx, cx - 1, by + 1, 2, 7, "#ffffff"); // tie / shirt line
 
-function plant(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  rect(ctx, x + 2, y + 8, 6, 5, C.pot, "#000");
-  ctx.fillStyle = C.plantDark;
-  ctx.fillRect(px(x), py(y + 2), 10, 8);
-  ctx.fillStyle = C.plant;
-  ctx.fillRect(px(x + 1), py(y), 8, 7);
-  ctx.fillRect(px(x + 3), py(y - 2), 4, 4);
-}
-
-// helper to avoid name collision
-function py(y: number) { return Math.round(y); }
-
-function chair(ctx: CanvasRenderingContext2D, x: number, y: number, dir: "up" | "down" | "left" | "right" = "down") {
-  rect(ctx, x, y, 10, 10, C.chair, C.chairDark);
-  if (dir === "down")  rect(ctx, x, y + 10, 10, 3, C.chairDark);
-  if (dir === "up")    rect(ctx, x, y - 3, 10, 3, C.chairDark);
-  if (dir === "left")  rect(ctx, x - 3, y, 3, 10, C.chairDark);
-  if (dir === "right") rect(ctx, x + 10, y, 3, 10, C.chairDark);
-}
-
-function character(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, working: boolean, t: number) {
-  // body
-  ctx.fillStyle = color;
-  ctx.fillRect(px(x + 2), px(y + 4), 8, 8);
-  // head
-  ctx.fillStyle = "#f4c89a";
-  ctx.fillRect(px(x + 3), px(y), 6, 5);
-  // hair
-  ctx.fillStyle = "#4a3a2a";
-  ctx.fillRect(px(x + 3), px(y), 6, 2);
-  if (working) {
-    // typing animation
-    const off = Math.sin(t * 5) > 0 ? 1 : 0;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(px(x + 1), px(y + 10 + off), 3, 2);
-    ctx.fillRect(px(x + 8), px(y + 10 + off), 3, 2);
-  }
-}
-
-function statusDot(ctx: CanvasRenderingContext2D, x: number, y: number, status: string, t: number) {
-  let color = "#445566";
-  if (status === "working") color = "#00ff88";
-  else if (status === "complete") color = "#4fc3f7";
-  else if (status === "error") color = "#ff5252";
-
-  const pulse = status === "working" ? 0.5 + Math.sin(t * 4) * 0.5 : 1;
-  ctx.globalAlpha = pulse;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(px(x), py(y), 4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-}
-
-// ── Room drawers ─────────────────────────────────────────────────────────
-
-function drawCEOOffice(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, state: AgentState | undefined, t: number) {
-  // Floor - wood
-  tile(ctx, x, y, w, h, C.wood1, C.wood2, 10);
-  // carpet
-  rect(ctx, x + 15, y + 20, w - 30, h - 35, "#2a3a5a");
-  rect(ctx, x + 18, y + 23, w - 36, h - 41, "#1e2d4f");
   // desk
-  rect(ctx, x + 20, y + 30, 60, 30, C.deskTop, C.desk);
-  rect(ctx, x + 22, y + 32, 56, 25, C.desk);
-  monitor(ctx, x + 25, y + 25, state?.status === "working", "#6c5ce7", t);
-  monitor(ctx, x + 50, y + 22, state?.status === "working", "#a855f7", t);
-  // chair behind desk
-  chair(ctx, x + 42, y + 55, "up");
-  // sofa
-  rect(ctx, x + 15, y + 90, 65, 18, C.sofa, C.sofaDark);
-  rect(ctx, x + 15, y + 90, 10, 18, C.sofaDark);
-  rect(ctx, x + 70, y + 90, 10, 18, C.sofaDark);
-  // bookshelf
-  rect(ctx, x + 5, y + 20, 12, h - 40, C.bookshelf, "#000");
-  for (let i = 0; i < 4; i++) {
-    ctx.fillStyle = ["#c0392b","#2980b9","#27ae60","#f39c12"][i];
-    ctx.fillRect(px(x + 6), py(y + 24 + i * 18), 10, 14);
-  }
-  // window
-  rect(ctx, x + 20, y + 5, 55, 20, C.window, C.windowFr);
-  rect(ctx, x + 47, y + 5, 2, 20, C.windowFr);
-  // plants
-  plant(ctx, x + w - 18, y + 20);
-  plant(ctx, x + w - 18, y + h - 25);
-  // agent
-  if (state) {
-    character(ctx, x + 44, y + 42, "#6c5ce7", state.status === "working", t);
-    statusDot(ctx, x + w - 10, y + 10, state.status, t);
+  box(ctx, cx - hw, top + 40, hw * 2, 15, P.desk, P.outline);
+  R(ctx, cx - hw + 1, top + 41, hw * 2 - 2, 3, P.deskTop);
+  R(ctx, cx - 8, top + 44, 16, 4, "#dfe2ea"); // keyboard
+  R(ctx, cx - 7, top + 45, 14, 1, "#b8bdc9");
+
+  // hands
+  const hy = working ? (Math.sin(t * 14) > 0 ? 0 : 1) : 0;
+  R(ctx, cx - 7, top + 42 + hy, 3, 3, a.skin);
+  R(ctx, cx + 4, top + 42 + (working ? 1 - hy : 0), 3, 3, a.skin);
+
+  // desk accessories
+  R(ctx, cx + hw - 11, top + 42, 5, 5, P.white); // mug
+  R(ctx, cx + hw - 10, top + 43, 3, 2, "#8b5a2b");
+  R(ctx, cx - hw + 4, top + 42, 7, 5, "#fffbe6"); // notes
+  R(ctx, cx - hw + 5, top + 44, 5, 1, "#d1b24a");
+
+  // selection cursor (corner brackets)
+  if (selected) {
+    const pad = 3 + Math.round(Math.sin(t * 6));
+    const x0 = cx - hw - pad, x1 = cx + hw + pad, y0 = top - 2 - pad, y1 = top + 57 + pad;
+    const L = 7, k = "#111827";
+    R(ctx, x0, y0, L, 2, k); R(ctx, x0, y0, 2, L, k);
+    R(ctx, x1 - L, y0, L, 2, k); R(ctx, x1 - 2, y0, 2, L, k);
+    R(ctx, x0, y1 - 2, L, 2, k); R(ctx, x0, y1 - L, 2, L, k);
+    R(ctx, x1 - L, y1 - 2, L, 2, k); R(ctx, x1 - 2, y1 - L, 2, L, k);
   }
 }
 
-function drawServerRoom(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, states: (AgentState | undefined)[], t: number) {
-  // Floor - gray industrial
-  tile(ctx, x, y, w, h, C.floorGray, C.floorGray2, 12);
-  // Server racks
-  for (let i = 0; i < 3; i++) {
-    rect(ctx, x + 10 + i * 35, y + 10, 25, h - 25, C.serverRack, "#000");
-    for (let j = 0; j < 6; j++) {
-      const on = Math.sin(t * 3 + i * 2 + j) > 0;
-      ctx.fillStyle = on ? C.serverLight : "#115533";
-      ctx.fillRect(px(x + 13 + i * 35), py(y + 15 + j * 12), 6, 3);
-      ctx.fillStyle = "#1a3a5a";
-      ctx.fillRect(px(x + 22 + i * 35), py(y + 15 + j * 12), 10, 3);
-    }
-    // cable at bottom
-    rect(ctx, x + 10 + i * 35, y + h - 15, 25, 5, "#0a0a1a");
-  }
-  // desks with monitors
-  rect(ctx, x + 5, y + h - 55, w - 10, 20, C.deskTop, C.desk);
-  for (let i = 0; i < 2; i++) {
-    monitor(ctx, x + 15 + i * 60, y + h - 60, states[i]?.status === "working", ["#45b7d1","#4ecdc4"][i], t);
-    if (states[i]) {
-      character(ctx, x + 20 + i * 60, y + h - 45, ["#45b7d1","#4ecdc4"][i], states[i]?.status === "working", t);
-      statusDot(ctx, x + 15 + i * 55 + 5, y + 10, states[i]?.status ?? "idle", t);
-    }
-  }
-  // cable conduits on ceiling
-  for (let i = 0; i < 4; i++) {
-    rect(ctx, x, y + 2 + i * 3, w, 2, "#1a2a3a");
-  }
+// ── Scene ──────────────────────────────────────────────────────────────────
+function drawScene(
+  ctx: Ctx,
+  states: Record<AgentKey, AgentState>,
+  selected: AgentKey | null,
+  t: number
+) {
+  // floor checkers
+  for (let ty = 40; ty < OFFICE_H; ty += 16)
+    for (let tx = 0; tx < OFFICE_W; tx += 16)
+      R(ctx, tx, ty, 16, 16, ((tx + ty) / 16) % 2 === 0 ? P.floorA : P.floorB);
+
+  // CEO carpet
+  for (let ty = 40; ty < 116; ty += 8)
+    for (let tx = 0; tx < 140; tx += 8)
+      R(ctx, tx, ty, 8, 8, ((tx + ty) / 8) % 2 === 0 ? P.carpetA : P.carpetB);
+
+  // back wall
+  R(ctx, 0, 0, OFFICE_W, 40, P.wall);
+  R(ctx, 0, 36, OFFICE_W, 4, P.wallTrim);
+  R(ctx, 0, 40, OFFICE_W, 2, "rgba(0,0,0,0.07)");
+  windowPane(ctx, 8, 6, 34, 26);
+  poster(ctx, 54, 8, "#ffb454");
+  poster(ctx, 76, 8, "#8ccbf7");
+  fileCabinet(ctx, 104, 10);
+  windowPane(ctx, 150, 6, 34, 26);
+  counter(ctx, 196, 20, 36);
+  windowPane(ctx, 242, 6, 34, 26);
+  counter(ctx, 286, 20, 40);
+  plant(ctx, 128, 14);
+  plant(ctx, 236, 12);
+  snackMachine(ctx, 334, 8);
+  cooler(ctx, 366, 14);
+  R(ctx, 200, 14, 8, 6, P.white); // coffee machine top
+  R(ctx, 202, 10, 4, 4, P.metalDark);
+
+  // orange partitions
+  orangeV(ctx, 138, 42, 74);
+  orangeH(ctx, 0, 112, 104);
+  orangeH(ctx, 152, 118, 218);
+
+  // CEO office decor
+  bookshelf(ctx, 6, 46);
+  plant(ctx, 120, 48);
+  sofa(ctx, 8, 84, 30, 16);
+
+  // lounge
+  pingPong(ctx, 12, 140, t);
+  bookshelf(ctx, 104, 138);
+  plant(ctx, 120, 178);
+  sofa(ctx, 8, 212, 52, 22);
+  box(ctx, 72, 220, 14, 14, "#ffffff", P.metalDark);
+  R(ctx, 75, 223, 8, 8, "#f08a24");
+
+  // meeting room
+  meetingRoom(ctx, t);
+  plant(ctx, 366, 218);
+
+  // desks + people
+  AGENTS.forEach((a, i) => drawUnit(ctx, a, states[a.key]?.status ?? "idle", selected === a.key, t, i));
 }
 
-function drawCreativeStudio(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, states: (AgentState | undefined)[], t: number) {
-  // Floor - warm wood
-  tile(ctx, x, y, w, h, C.floor1, C.floor2, 12);
-  // Large monitor/screen wall
-  rect(ctx, x + 10, y + 10, w - 20, 30, C.monitor, "#000");
-  const prog = states[0]?.status === "working" ? Math.sin(t * 2) * 0.5 + 0.5 : 0;
-  // color gradient on screen
-  const grad = ctx.createLinearGradient(x + 12, 0, x + w - 12, 0);
-  grad.addColorStop(0, "#ff006e");
-  grad.addColorStop(0.5, "#8338ec");
-  grad.addColorStop(1, "#3a86ff");
-  ctx.fillStyle = states[0]?.status === "working" ? grad : "#0a0a1a";
-  ctx.fillRect(px(x + 12), py(y + 12), px(w - 24), 26);
-  if (states[0]?.status === "working") {
-    // waveform
-    ctx.strokeStyle = "rgba(255,255,255,0.6)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let xi = 0; xi < w - 24; xi += 2) {
-      const wave = Math.sin(xi * 0.1 + t * 4) * 6 + 25;
-      if (xi === 0) ctx.moveTo(px(x + 12 + xi), py(y + 12 + wave));
-      else ctx.lineTo(px(x + 12 + xi), py(y + 12 + wave));
-    }
-    ctx.stroke();
-  }
-  // desks
-  rect(ctx, x + 10, y + 55, w - 20, 18, C.deskTop, C.desk);
-  for (let i = 0; i < 2; i++) {
-    monitor(ctx, x + 15 + i * 55, y + 48, states[i]?.status === "working", ["#ff6b6b","#f9ca24"][i], t);
-    if (states[i]) {
-      character(ctx, x + 20 + i * 55, y + 60, ["#ff6b6b","#f9ca24"][i], states[i]?.status === "working", t);
-      statusDot(ctx, x + 10 + i * 55, y + h - 10, states[i]?.status ?? "idle", t);
-    }
-  }
-  // plants
-  plant(ctx, x + 5, y + h - 25);
-  plant(ctx, x + w - 18, y + h - 25);
-  // color swatches on wall
-  const swatches = ["#ff006e","#f9ca24","#45b7d1","#00b894","#6c5ce7"];
-  swatches.forEach((c, i) => {
-    rect(ctx, x + 10 + i * 20, y + h - 18, 16, 10, c, "#000");
-  });
+// ── Component ──────────────────────────────────────────────────────────────
+interface Props {
+  agentStates: Record<AgentKey, AgentState>;
+  selected: AgentKey | null;
+  onSelect: (key: AgentKey) => void;
 }
 
-function drawMeetingRoom(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, states: (AgentState | undefined)[], t: number) {
-  // Floor - wood
-  tile(ctx, x, y, w, h, C.wood1, C.wood2, 10);
-  // Round table
-  const cx2 = x + w / 2, cy2 = y + h / 2 - 5;
-  ctx.fillStyle = C.table;
-  ctx.beginPath();
-  ctx.arc(px(cx2), py(cy2), 35, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "#2a1a0a";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  ctx.fillStyle = C.deskTop;
-  ctx.beginPath();
-  ctx.arc(px(cx2), py(cy2), 32, 0, Math.PI * 2);
-  ctx.fill();
-  // chairs around table
-  const angles = [0, 60, 120, 180, 240, 300];
-  angles.forEach((a) => {
-    const rad = (a * Math.PI) / 180;
-    const cx3 = cx2 + Math.cos(rad) * 44;
-    const cy3 = cy2 + Math.sin(rad) * 44;
-    rect(ctx, px(cx3 - 7), py(cy3 - 7), 14, 14, C.chair, C.chairDark);
-  });
-  // whiteboard
-  rect(ctx, x + 10, y + 8, w - 20, 22, "#e8e8f0", "#aaa");
-  rect(ctx, x + 12, y + 10, w - 24, 18, "#f0f0ff");
-  if (states[0]?.status === "working") {
-    ctx.strokeStyle = "#2244cc";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(px(x + 20), py(y + 15));
-    for (let i = 0; i < 50; i += 5) {
-      ctx.lineTo(px(x + 20 + i), py(y + 15 + Math.sin(i * 0.5 + t * 2) * 5));
-    }
-    ctx.stroke();
-  }
-  // agents
-  if (states[0]) {
-    character(ctx, px(cx2 - 25), py(cy2 - 40), "#00b894", states[0].status === "working", t);
-    statusDot(ctx, x + w - 10, y + 10, states[0].status, t);
-  }
-  if (states[1]) {
-    character(ctx, px(cx2 + 10), py(cy2 - 40), "#45b7d1", states[1].status === "working", t);
-    statusDot(ctx, x + w - 25, y + 10, states[1].status, t);
-  }
-  // plants
-  plant(ctx, x + w - 15, y + h - 25);
-}
+const BUBBLE: Record<AgentStatus, { text: string; bg: string; fg: string }> = {
+  working:  { text: "...", bg: "#ffffff", fg: "#111827" },
+  complete: { text: "OK",  bg: "#4ade80", fg: "#052e16" },
+  error:    { text: "!",   bg: "#f87171", fg: "#450a0a" },
+  idle:     { text: "zz",  bg: "#e5e7eb", fg: "#6b7280" },
+};
 
-function drawLounge(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, state: AgentState | undefined, t: number) {
-  // Floor - warm
-  tile(ctx, x, y, w, h, C.floor1, C.floor2, 10);
-  // rug
-  rect(ctx, x + 10, y + 30, w - 20, h - 50, "#5a2a6a");
-  rect(ctx, x + 14, y + 34, w - 28, h - 58, "#4a1a5a");
-  // sofa
-  rect(ctx, x + 10, y + 55, 50, 22, C.sofa, C.sofaDark);
-  rect(ctx, x + 10, y + 55, 8, 22, C.sofaDark);
-  rect(ctx, x + 52, y + 55, 8, 22, C.sofaDark);
-  // coffee table
-  rect(ctx, x + 20, y + 80, 30, 15, C.deskTop, C.desk);
-  // coffee machine
-  rect(ctx, x + w - 30, y + 15, 20, 30, "#2a2a3a", "#000");
-  rect(ctx, x + w - 26, y + 18, 12, 10, "#1a1a2a");
-  ctx.fillStyle = state?.status === "working" ? "#ff4400" : "#441100";
-  ctx.fillRect(px(x + w - 24), py(y + 20), 8, 6);
-  // small monitor
-  monitor(ctx, x + 15, y + 20, false, "#a855f7", t);
-  // plants
-  plant(ctx, x + 5, y + 20);
-  plant(ctx, x + 5, y + h - 25);
-  plant(ctx, x + w - 18, y + h - 25);
-  // agent relaxing
-  if (state) {
-    character(ctx, x + 28, y + 50, "#a855f7", state.status === "working", t);
-    statusDot(ctx, x + w - 10, y + 10, state.status, t);
-  }
-}
-
-function drawMobileHub(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, state: AgentState | undefined, t: number) {
-  // Floor
-  tile(ctx, x, y, w, h, C.floorGray, C.floorGray2, 10);
-  // desk row
-  rect(ctx, x + 5, y + 30, w - 10, 20, C.deskTop, C.desk);
-  // phones/tablets mockup
-  for (let i = 0; i < 3; i++) {
-    rect(ctx, x + 10 + i * 30, y + 20, 18, 30, C.monitor, "#000");
-    ctx.fillStyle = state?.status === "working" ? ["#f9ca24","#ff6b6b","#4ecdc4"][i] : "#0a0a1a";
-    ctx.fillRect(px(x + 12 + i * 30), py(y + 22), 14, 24);
-    if (state?.status === "working") {
-      const scanY = Math.floor(t * 6 + i * 3) % 24;
-      ctx.fillStyle = "rgba(255,255,255,0.2)";
-      ctx.fillRect(px(x + 12 + i * 30), py(y + 22 + scanY), 14, 1);
-    }
-  }
-  // main monitor
-  monitor(ctx, x + w / 2 - 10, y + h - 50, state?.status === "working", "#f9ca24", t);
-  if (state) {
-    character(ctx, x + w / 2 - 5, y + h - 38, "#f9ca24", state.status === "working", t);
-    statusDot(ctx, x + w - 10, y + 10, state.status, t);
-  }
-  plant(ctx, x + 5, y + h - 25);
-}
-
-// ── Main component ────────────────────────────────────────────────────────
-export default function PixelOffice({ agentStates, onRoomClick }: {
-  agentStates: Record<string, AgentState>;
-  onRoomClick?: (crew: string) => void;
-}) {
+export default function PixelOffice({ agentStates, selected, onSelect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef  = useRef(agentStates);
-  useEffect(() => { stateRef.current = agentStates; }, [agentStates]);
-
-  // Click detection
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !onRoomClick) return;
-    const onClick = (e: MouseEvent) => {
-      const r = canvas.getBoundingClientRect();
-      const scaleX = canvas.width  / r.width;
-      const scaleY = canvas.height / r.height;
-      const mx = (e.clientX - r.left) * scaleX;
-      const my = (e.clientY - r.top)  * scaleY;
-      const W = canvas.width, H = canvas.height;
-      const hW = W / 2 - 15, hH = H / 2 - 15;
-      // map click to rooms
-      if (mx < hW && my < hH)             onRoomClick("marketing");
-      else if (mx > hW + 30 && my < hH)   onRoomClick("backend");
-      else if (mx < hW && my > hH + 30)   onRoomClick("planning");
-      else if (mx > hW + 30 && my > hH + 30) onRoomClick("mobile");
-    };
-    canvas.addEventListener("click", onClick);
-    return () => canvas.removeEventListener("click", onClick);
-  }, [onRoomClick]);
+  const statesRef = useRef(agentStates);
+  const selectedRef = useRef(selected);
+  statesRef.current = agentStates;
+  selectedRef.current = selected;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
-    if (!ctx) return;
-
-    ctx.imageSmoothingEnabled = false;
+    const ctx = canvas.getContext("2d") as Ctx;
     let raf = 0;
-    const start = Date.now();
-
-    function draw() {
-      raf = requestAnimationFrame(draw);
-      const t = (Date.now() - start) / 1000;
-      const st = stateRef.current;
-      const W = canvas!.width, H = canvas!.height;
-
-      // ── Background ─────────────────────────────────────────────────
-      ctx.fillStyle = C.wallDark;
-      ctx.fillRect(0, 0, W, H);
-
-      // Room sizes
-      const pad  = 8;
-      const hall = 30;
-      const rW   = (W - 2 * pad - hall) / 2;
-      const rH   = (H - 2 * pad - hall) / 2;
-      const hX   = pad + rW;
-      const hY   = pad + rH;
-
-      // ── Hallway / lobby ─────────────────────────────────────────
-      tile(ctx, hX, pad, hall, H - 2 * pad, C.floorGray, C.floorGray2, 8);
-      tile(ctx, pad, hY, W - 2 * pad, hall, C.floorGray, C.floorGray2, 8);
-      // Lobby center
-      rect(ctx, hX, hY, hall, hall, "#6a6a7e");
-      // bulletin board in lobby
-      rect(ctx, hX + 5, hY + 5, hall - 10, hall - 10, "#c8a86a", "#8a7040");
-      ctx.fillStyle = "#fff";
-      ctx.font = "5px monospace";
-      ctx.fillText("HQ", hX + 11, hY + 17);
-
-      // ── Walls between rooms ──────────────────────────────────────
-      ctx.fillStyle = C.wall;
-      ctx.fillRect(0, 0, W, pad);
-      ctx.fillRect(0, H - pad, W, pad);
-      ctx.fillRect(0, 0, pad, H);
-      ctx.fillRect(W - pad, 0, pad, H);
-
-      // Room labels (door frames)
-      ctx.fillStyle = C.wall;
-      ctx.fillRect(pad + rW - 2, pad, 2, rH);       // top-left border right
-      ctx.fillRect(hX + hall, pad, 2, rH);           // top-right border left
-      ctx.fillRect(pad + rW - 2, hY + hall, 2, rH);  // bot-left border right
-      ctx.fillRect(hX + hall, hY + hall, 2, rH);     // bot-right border left
-      ctx.fillRect(pad, pad + rH - 2, hX - pad, 2);  // left rooms divider bottom
-      ctx.fillRect(hX + hall, pad + rH - 2, W - hX - hall - pad, 2);
-
-      // ── Rooms ───────────────────────────────────────────────────
-      // Top-left: CEO (orchestrator + marketing)
-      drawCEOOffice(ctx, pad, pad, rW - 2, rH - 2, st["marketing"], t);
-
-      // Top-right: Server room (backend + frontend)
-      drawServerRoom(ctx, hX + hall + 2, pad, rW - 2, rH - 2,
-        [st["backend"], st["frontend"]], t);
-
-      // Bottom-left: Creative studio (images)
-      drawCreativeStudio(ctx, pad, hY + hall + 2, rW - 2, rH - 2,
-        [st["images"], st["marketing"]], t);
-
-      // Bottom-right: Meeting room (planning + mobile)
-      drawMeetingRoom(ctx, hX + hall + 2, hY + hall + 2, rW - 2, rH - 2,
-        [st["planning"], st["mobile"]], t);
-
-      // ── Room signs ───────────────────────────────────────────────
-      ctx.font      = "bold 7px monospace";
-      ctx.textAlign = "left";
-      const signs: [number, number, string, string][] = [
-        [pad + 3,          pad + rH - 8, "CEO / MARKETING", st["marketing"]?.status ?? "idle"],
-        [hX + hall + 3,    pad + rH - 8, "SERVER ROOM",    "idle"],
-        [pad + 3,          H - pad - 8,  "CREATIVE STUDIO","idle"],
-        [hX + hall + 3,    H - pad - 8,  "PLANNING / MOBILE","idle"],
-      ];
-      signs.forEach(([sx, sy, label, status]) => {
-        const sc = status === "working" ? C.serverLight : "#aab";
-        ctx.fillStyle = "rgba(0,0,0,0.6)";
-        ctx.fillRect(px(sx - 2), py(sy - 7), label.length * 4.5 + 4, 10);
-        ctx.fillStyle = sc;
-        ctx.fillText(label, px(sx), py(sy));
-      });
-
-      // ── Neon border ──────────────────────────────────────────────
-      const alpha = 0.6 + Math.sin(t * 1.5) * 0.2;
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = C.neonBlue;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, W - 2, H - 2);
-      ctx.strokeStyle = C.neonPurp;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(3, 3, W - 6, H - 6);
-      ctx.globalAlpha = 1;
-    }
-
-    draw();
+    let last = 0;
+    const loop = (ms: number) => {
+      raf = requestAnimationFrame(loop);
+      if (ms - last < 33) return;
+      last = ms;
+      drawScene(ctx, statesRef.current, selectedRef.current, ms / 1000);
+    };
+    raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={560}
-      height={420}
-      style={{
-        width: "100%",
-        height: "100%",
-        imageRendering: "pixelated",
-        cursor: "pointer",
-      }}
-    />
+    <div
+      className="relative w-full select-none"
+      style={{ aspectRatio: `${OFFICE_W} / ${OFFICE_H}`, containerType: "inline-size" }}
+    >
+      <canvas
+        ref={canvasRef}
+        width={OFFICE_W}
+        height={OFFICE_H}
+        className="absolute inset-0 h-full w-full"
+        style={{ imageRendering: "pixelated" }}
+      />
+      {AGENTS.map((a) => {
+        const st = agentStates[a.key]?.status ?? "idle";
+        const b = BUBBLE[st];
+        const w = a.key === "orchestrator" ? 72 : 56;
+        return (
+          <button
+            key={a.key}
+            type="button"
+            aria-label={`${a.label}: ${st}`}
+            onClick={() => onSelect(a.key)}
+            className="absolute cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-black"
+            style={{
+              left: `${((a.cx - w / 2) / OFFICE_W) * 100}%`,
+              top: `${((a.top - 12) / OFFICE_H) * 100}%`,
+              width: `${(w / OFFICE_W) * 100}%`,
+              height: `${(72 / OFFICE_H) * 100}%`,
+            }}
+          >
+            <span
+              className="pointer-events-none absolute left-1/2 top-0 flex -translate-x-1/2 items-center gap-[0.4cqw] whitespace-nowrap border-2 border-[#3a2f2a] px-[1cqw] py-[0.35cqw] font-pixel text-white"
+              style={{ background: a.color, fontSize: "clamp(6px, 1.7cqw, 12px)" }}
+            >
+              {st === "working" && <span className="inline-block animate-spin">⚙</span>}
+              {a.label}
+            </span>
+            <span
+              className="pointer-events-none absolute -top-[2.2cqw] left-[calc(50%+4cqw)] flex items-center justify-center border-2 border-[#3a2f2a] font-pixel"
+              style={{
+                background: b.bg,
+                color: b.fg,
+                minWidth: "3.4cqw",
+                height: "3.4cqw",
+                padding: "0 0.6cqw",
+                fontSize: "clamp(5px, 1.3cqw, 9px)",
+              }}
+            >
+              {b.text}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }

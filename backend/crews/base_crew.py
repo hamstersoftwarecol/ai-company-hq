@@ -33,13 +33,19 @@ class BaseCrew:
         await self.emit_event(
             agent=agent_name, status="working", task=task, output="", model_used=model
         )
-        response = await llm.acompletion(
-            model=model,
-            messages=[
-                {"role": "system", "content": role},
-                {"role": "user", "content": task},
-            ],
-        )
+        try:
+            response = await llm.acompletion(
+                model=model,
+                messages=[
+                    {"role": "system", "content": role},
+                    {"role": "user", "content": task},
+                ],
+            )
+        except Exception as exc:
+            await self.emit_event(
+                agent=agent_name, status="error", task=task, output=str(exc), model_used=model
+            )
+            raise
         output = response.choices[0].message.content or ""
         await self.emit_event(
             agent=agent_name, status="complete", task=task, output=output, model_used=model

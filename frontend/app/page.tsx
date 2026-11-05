@@ -1,82 +1,129 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { sendTask } from "@/lib/api";
-import { AgentsGrid } from "@/components/AgentsGrid";
-import { CommandInput } from "@/components/CommandInput";
-import { LiveLog } from "@/components/LiveLog";
-import { StatusBar } from "@/components/StatusBar";
+import { AGENT_BY_KEY } from "@/lib/office";
+import type { AgentKey } from "@/types/agent";
+import ControlPanel, { type HistoryEntry } from "@/components/ControlPanel";
 import SettingsPanel from "@/components/SettingsPanel";
+
+const PixelOffice = dynamic(() => import("@/components/PixelOffice"), { ssr: false });
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
 
-interface HistoryEntry {
-  id: string;
-  instruction: string;
-  ts: string;
-}
-
-export default function DashboardPage() {
+export default function OfficePage() {
   const { events, agentStates, isConnected } = useWebSocket(WS_URL);
-  const [submitting, setSubmitting] = useState(false);
+  const [selected, setSelected] = useState<AgentKey>("orchestrator");
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showSettings, setShowSettings] = useState(false);
 
-  async function handleSubmit(instruction: string) {
-    setSubmitting(true);
+  const target = AGENT_BY_KEY[selected];
+  const working = Object.values(agentStates).filter((s) => s.status === "working").length;
+
+  async function handleSend() {
+    const instruction = text.trim();
+    if (!instruction || sending) return;
+    setSending(true);
+    setError("");
     try {
-      const { task_id } = await sendTask(instruction);
+      const { task_id } = await sendTask(instruction, selected === "orchestrator" ? undefined : selected);
       setHistory((prev) => [
-        { id: task_id, instruction, ts: new Date().toLocaleTimeString() },
+        { id: task_id, target: selected, instruction, ts: new Date().toLocaleTimeString() },
         ...prev,
       ]);
-    } catch (err) {
-      console.error("sendTask failed", err);
+      setText("");
+    } catch {
+      setError("No se pudo enviar. ¿Está el backend encendido en el puerto 8000?");
     } finally {
-      setSubmitting(false);
+      setSending(false);
     }
   }
 
   return (
-    <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
+    <div className="min-h-screen">
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
-      {/* Left sidebar */}
-      <aside className="w-72 flex flex-col border-r border-white/10 shrink-0">
-        <div className="flex items-center justify-between pr-2">
-          <StatusBar agentStates={agentStates} isConnected={isConnected} />
-          <button
-            onClick={() => setShowSettings(true)}
-            title="Configurar API keys"
-            className="shrink-0 text-white/40 hover:text-white/80 transition-colors text-base px-2"
-          >
-            ⚙️
-          </button>
-        </div>
-        <CommandInput onSubmit={handleSubmit} disabled={submitting} />
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
-          <p className="text-xs font-medium text-gray-500 mb-2">Historial</p>
-          {history.length === 0 && (
-            <p className="text-xs text-gray-600">Sin instrucciones aún.</p>
-          )}
-          {history.map((h) => (
-            <div key={h.id} className="mb-2 text-xs border border-white/5 rounded-lg p-2 bg-white/5">
-              <span className="text-gray-500 mr-1">{h.ts}</span>
-              <span className="text-gray-300">{h.instruction}</span>
-            </div>
-          ))}
-        </div>
-      </aside>
+      <header className="flex flex-wrap items-center gap-3 border-b-[3px] border-[#3a2f2a] bg-[#ffcf6b] px-4 py-3">
+        <h1 className="font-pixel text-[11px] leading-snug sm:text-sm">MI OFICINA VIRTUAL</h1>
+        <span
+          className="font-pixel inline-flex items-center gap-2 border-2 border-[#3a2f2a] bg-white px-2 py-1.5 text-[8px]"
+          title={isConnected ? "Conectado al backend" : "Sin conexión con el backend"}
+        >
+          <span
+            className="inline-block h-2.5 w-2.5 border border-[#3a2f2a]"
+            style={{ background: isConnected ? "#22c55e" : "#ef4444" }}
+          />
+          {isConnected ? "CONECTADO" : "SIN CONEXIÓN"}
+        </span>
+        {working > 0 && (
+          <span className="font-pixel border-2 border-[#3a2f2a] bg-[#f08a24] px-2 py-1.5 text-[8px] text-white">
+            {working} TRABAJANDO
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          className="px-btn px-btn-ghost ml-auto"
+        >
+          AJUSTES
+        </button>
+      </header>
 
-      {/* Main area */}
-      <main className="flex flex-col flex-1 overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
-          <AgentsGrid agentStates={agentStates} />
-        </div>
-        <div className="h-48 shrink-0">
-          <LiveLog events={events} />
-        </div>
+      <main className="mx-auto grid max-w-[1400px] gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="flex min-w-0 flex-col gap-4">
+          <div className="px-panel p-2">
+            <PixelOffice agentStates={agentStates} selected={selected} onSelect={setSelected} />
+          </div>
+
+          {/* Command bar */}
+          <div className="px-panel flex flex-col gap-3 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-pixel text-[9px]">PARA:</span>
+              <span
+                className="font-pixel border-2 border-[#3a2f2a] px-2 py-1.5 text-[9px] text-white"
+                style={{ background: target.color }}
+              >
+                {target.label}
+              </span>
+              <span className="text-xs text-[#6b5d52]">
+                {selected === "orchestrator"
+                  ? "El CEO decide qué equipos hacen falta y les reparte el trabajo."
+                  : "Se lo asignas directo a este agente. Cambia de agente haciendo clic en la oficina."}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSend();
+                }}
+                placeholder={`¿Qué debe hacer ${target.label}?`}
+                className="px-input"
+                aria-label="Instrucción para el agente"
+              />
+              <button type="button" onClick={handleSend} disabled={sending || !text.trim()} className="px-btn shrink-0">
+                {sending ? "ENVIANDO…" : "ENVIAR"}
+              </button>
+            </div>
+            {error && <p className="text-sm font-medium text-red-600">{error}</p>}
+          </div>
+        </section>
+
+        <aside className="min-w-0">
+          <ControlPanel
+            agentStates={agentStates}
+            selected={selected}
+            onSelect={setSelected}
+            events={events}
+            history={history}
+          />
+        </aside>
       </main>
     </div>
   );

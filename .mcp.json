@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ai-company-crews": {
+      "command": "/Users/alejandro/Documents/agentesdeIA/backend/.venv/bin/python",
+      "args": [
+        "/Users/alejandro/Documents/agentesdeIA/backend/mcp_servers/stdio_server.py"
+      ]
+    }
+  }
+}

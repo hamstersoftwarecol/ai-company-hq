@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4efe4;
+  --foreground: #2b2420;
+  --ink: #3a2f2a;
+  --orange: #f08a24;
+  --orange-dark: #c96a10;
+  --panel: #ffffff;
+  --soft: #faf6ee;
 }
 
 @theme inline {
@@ -10,17 +15,73 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-pixel: var(--font-press-start);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Chunky light "video game" UI pieces */
+.px-panel {
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.px-btn {
+  font-family: var(--font-press-start), monospace;
+  font-size: 10px;
+  line-height: 1;
+  padding: 11px 14px;
+  color: #fff;
+  background: var(--orange);
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  cursor: pointer;
+  transition: transform 80ms, box-shadow 80ms;
+}
+.px-btn:hover:not(:disabled) {
+  background: #ff9b3a;
+}
+.px-btn:active:not(:disabled) {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 var(--ink);
+}
+.px-btn:disabled {
+  background: #e5dfd2;
+  color: #9a9084;
+  cursor: not-allowed;
+}
+.px-btn-ghost {
+  background: #fff;
+  color: var(--ink);
+}
+.px-btn-ghost:hover:not(:disabled) {
+  background: #fff3e0;
+}
+
+.px-input {
+  width: 100%;
+  background: #fff;
+  color: var(--foreground);
+  border: 3px solid var(--ink);
+  padding: 9px 11px;
+  font-size: 14px;
+  outline: none;
+}
+.px-input:focus {
+  background: #fffaf0;
+  box-shadow: inset 0 0 0 2px var(--orange);
+}
+
+.px-title {
+  font-family: var(--font-press-start), monospace;
+  letter-spacing: 0;
 }

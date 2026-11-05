@@ -3,13 +3,13 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from config import save_api_keys
 from events.ws_manager import ws_manager
-from orchestrator.ceo_agent import process_instruction
+from orchestrator.ceo_agent import dispatch_to_crew, process_instruction
 from mcp_servers.crew_server import get_server, set_ws_manager
 
 CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]
@@ -27,7 +27,7 @@ app = FastAPI(title="AI Company HQ", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -41,6 +41,7 @@ task_history: list[dict] = []
 
 class TaskRequest(BaseModel):
     instruction: str
+    crew: str | None = None
 
 
 class SettingsRequest(BaseModel):
@@ -87,8 +88,10 @@ async def get_history() -> list:
 
 @app.post("/task")
 async def post_task(body: TaskRequest) -> dict:
+    if body.crew is not None and body.crew not in CREW_NAMES:
+        raise HTTPException(status_code=400, detail=f"Unknown crew: {body.crew}")
     task_id = str(uuid.uuid4())
-    asyncio.create_task(_run_task(task_id, body.instruction))
+    asyncio.create_task(_run_task(task_id, body.instruction, body.crew))
     return {"task_id": task_id}
 
 
@@ -103,11 +106,15 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await ws_manager.disconnect(ws)
 
 
-async def _run_task(task_id: str, instruction: str) -> None:
-    task_history.append({"task_id": task_id, "instruction": instruction, "status": "running"})
+async def _run_task(task_id: str, instruction: str, crew: str | None = None) -> None:
+    task_history.append({"task_id": task_id, "instruction": instruction, "crew": crew, "status": "running"})
     try:
-        # CEO plans and dispatches crews via MCP tools
-        result = await process_instruction(instruction, ws_manager)
+        if crew:
+            # Direct assignment: skip the CEO and call that crew's MCP tool
+            result = await dispatch_to_crew(crew, instruction)
+        else:
+            # CEO plans and dispatches crews via MCP tools
+            result = await process_instruction(instruction, ws_manager)
         for entry in task_history:
             if entry["task_id"] == task_id:
                 entry["status"] = "complete"

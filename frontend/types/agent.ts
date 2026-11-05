@@ -12,9 +12,10 @@ export interface AgentEvent {
 }
 
 export type CrewName = "marketing" | "frontend" | "backend" | "mobile" | "images" | "planning";
+export type AgentKey = CrewName | "orchestrator";
 
 export interface AgentState {
-  crew: CrewName;
+  crew: AgentKey;
   status: AgentStatus;
   currentTask: string;
   lastOutput: string;
