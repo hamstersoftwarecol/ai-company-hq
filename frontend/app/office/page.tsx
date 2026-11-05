@@ -1,204 +1,69 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { sendTask } from "@/lib/api";
 import Link from "next/link";
-import * as THREE from "three";
-import type { OfficeHandle } from "@/components/OfficeScene";
 
-const OfficeScene = dynamic(() => import("@/components/OfficeScene"), { ssr: false });
+const PixelOffice = dynamic(() => import("@/components/PixelOffice"), { ssr: false });
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
 
-const CREW_NAMES  = ["marketing","frontend","backend","mobile","images","planning"];
-const CREW_LABELS = ["Marketing","Frontend","Backend","Mobile","Images","Planning"];
-const CREW_COLORS = ["#ff6b6b","#4ecdc4","#45b7d1","#f9ca24","#6c5ce7","#00b894"];
-const DESK_WORLD: [number, number, number][] = [
-  [-5, 2.2, -4],[0, 2.2, -4],[5, 2.2, -4],
-  [-5, 2.2,  2],[0, 2.2,  2],[5, 2.2,  2],
-];
+const CREW_INFO: Record<string, { label: string; color: string; room: string }> = {
+  marketing:  { label: "Marketing",  color: "#ff6b6b", room: "CEO / Marketing" },
+  frontend:   { label: "Frontend",   color: "#4ecdc4", room: "Server Room" },
+  backend:    { label: "Backend",    color: "#45b7d1", room: "Server Room" },
+  mobile:     { label: "Mobile",     color: "#f9ca24", room: "Planning / Mobile" },
+  images:     { label: "Creative",   color: "#6c5ce7", room: "Creative Studio" },
+  planning:   { label: "Planning",   color: "#00b894", room: "Meeting Room" },
+};
 
 function statusColor(s: string) {
-  if (s === "working") return "#00ff88";
+  if (s === "working")  return "#00ff88";
   if (s === "complete") return "#4fc3f7";
-  if (s === "error") return "#ff5252";
+  if (s === "error")    return "#ff5252";
   return "#445566";
 }
 
-interface LabelPos { x: number; y: number; visible: boolean }
-
 export default function OfficePage() {
   const { agentStates, isConnected, events } = useWebSocket(WS_URL);
-  const [input, setInput] = useState("");
+  const [input, setInput]   = useState("");
   const [sending, setSending] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
-  const [locked, setLocked] = useState(false);
-  const [labelPositions, setLabelPositions] = useState<LabelPos[]>(
-    CREW_NAMES.map(() => ({ x: 0, y: 0, visible: false }))
-  );
-
-  const handleRef = useRef<OfficeHandle>({ camera: null, renderer: null });
-  const rafRef = useRef<number>(0);
+  const [selected, setSelected] = useState<string | null>(null);
 
   const active = Object.values(agentStates).filter((s) => s.status === "working").length;
-
-  // Track pointer lock
-  useEffect(() => {
-    const onChange = () => setLocked(document.pointerLockElement !== null);
-    document.addEventListener("pointerlockchange", onChange);
-    return () => document.removeEventListener("pointerlockchange", onChange);
-  }, []);
-
-  // Project 3D → 2D labels every frame
-  const startProjection = useCallback(() => {
-    const v = new THREE.Vector3();
-    function loop() {
-      rafRef.current = requestAnimationFrame(loop);
-      const { camera, renderer } = handleRef.current;
-      if (!camera || !renderer) return;
-      const w = renderer.domElement.clientWidth;
-      const h = renderer.domElement.clientHeight;
-      const positions = DESK_WORLD.map(([wx, wy, wz]) => {
-        v.set(wx, wy, wz);
-        v.project(camera);
-        const x = (v.x * 0.5 + 0.5) * w;
-        const y = (-v.y * 0.5 + 0.5) * h;
-        return { x, y, visible: v.z < 1 && x > 0 && x < w && y > 0 && y < h };
-      });
-      setLabelPositions(positions);
-    }
-    loop();
-    return () => cancelAnimationFrame(rafRef.current);
-  }, []);
-
-  const handleReady = useCallback((h: OfficeHandle) => {
-    handleRef.current = h;
-    startProjection();
-  }, [startProjection]);
 
   async function handleSend() {
     if (!input.trim() || sending) return;
     setSending(true);
     try {
       await sendTask(input.trim());
-      setLog((p) => [`${new Date().toLocaleTimeString()} — ${input.trim()}`, ...p.slice(0, 9)]);
       setInput("");
     } catch { /* ignore */ }
     finally { setSending(false); }
   }
 
+  const crews = Object.entries(CREW_INFO);
+
   return (
-    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#020210", fontFamily: "monospace" }}>
-      {/* 3D canvas */}
-      <div style={{ position: "absolute", inset: 0 }}>
-        <OfficeScene agentStates={agentStates} onReady={handleReady} />
-      </div>
+    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#0a0a16", fontFamily: "monospace", display: "flex", flexDirection: "column" }}>
 
-      {/* Floating agent labels projected from 3D */}
-      {CREW_NAMES.map((crew, i) => {
-        const lp = labelPositions[i];
-        if (!lp.visible) return null;
-        const st = agentStates[crew];
-        const sc = statusColor(st?.status ?? "idle");
-        const isWorking = st?.status === "working";
-        return (
-          <div
-            key={crew}
-            style={{
-              position: "absolute",
-              left: lp.x,
-              top: lp.y,
-              transform: "translate(-50%, -100%)",
-              zIndex: 15,
-              pointerEvents: "none",
-              minWidth: 140,
-            }}
-          >
-            <div style={{
-              background: "rgba(5,5,20,0.88)",
-              border: `1px solid ${CREW_COLORS[i]}44`,
-              borderRadius: 6,
-              padding: "5px 10px",
-              backdropFilter: "blur(4px)",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ color: CREW_COLORS[i], fontWeight: "bold", fontSize: 11, letterSpacing: 1 }}>
-                  {CREW_LABELS[i].toUpperCase()}
-                </span>
-                <span style={{
-                  marginLeft: "auto", fontSize: 9, padding: "1px 6px", borderRadius: 10,
-                  background: sc + "22", color: sc,
-                }}>
-                  {st?.status ?? "idle"}
-                </span>
-              </div>
-              {st?.currentTask ? (
-                <div style={{ color: "#aab", fontSize: 9, marginTop: 3, lineHeight: 1.4, maxWidth: 160 }}>
-                  {st.currentTask.slice(0, 60)}{st.currentTask.length > 60 ? "…" : ""}
-                </div>
-              ) : (
-                <div style={{ color: "#334", fontSize: 9, marginTop: 2 }}>Esperando…</div>
-              )}
-              {isWorking && (
-                <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
-                  {[0,1,2].map(j => (
-                    <div key={j} style={{
-                      width: 4, height: 4, borderRadius: "50%", background: "#00ff88",
-                      animation: `dot-pulse 1s ${j*0.3}s infinite ease-in-out`,
-                    }}/>
-                  ))}
-                </div>
-              )}
-            </div>
-            {/* Arrow pointing down to desk */}
-            <div style={{
-              width: 0, height: 0, margin: "0 auto",
-              borderLeft: "5px solid transparent",
-              borderRight: "5px solid transparent",
-              borderTop: `6px solid ${CREW_COLORS[i]}44`,
-            }}/>
-          </div>
-        );
-      })}
-
-      {/* Click to lock overlay */}
-      {!locked && (
-        <div style={{
-          position: "absolute", inset: 0, zIndex: 25,
-          display: "flex", flexDirection: "column",
-          alignItems: "center", justifyContent: "center",
-          background: "rgba(0,0,10,0.6)", backdropFilter: "blur(3px)",
-          cursor: "pointer",
-        }}
-          onClick={() => document.querySelector("canvas")?.requestPointerLock()}
-        >
-          <div style={{ color: "#00f5ff", fontSize: 24, fontWeight: "bold", letterSpacing: 4, marginBottom: 12 }}>
-            AI COMPANY HQ
-          </div>
-          <div style={{ color: "#aab", fontSize: 13, marginBottom: 24 }}>Haz clic para entrar a la oficina</div>
-          <div style={{ color: "#445", fontSize: 11, lineHeight: 2, textAlign: "center" }}>
-            WASD / ↑←↓→ — Moverse · Mouse — Mirar · ESC — Salir
-          </div>
-        </div>
-      )}
-
-      {/* Top HUD */}
+      {/* Top bar */}
       <div style={{
-        position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
-        display: "flex", alignItems: "center", gap: 16,
-        padding: "10px 20px",
-        background: "linear-gradient(to bottom, rgba(2,2,16,0.9), transparent)",
-        pointerEvents: "none",
+        display: "flex", alignItems: "center", gap: 12,
+        padding: "8px 16px",
+        background: "rgba(10,10,22,0.95)",
+        borderBottom: "1px solid rgba(0,245,255,0.15)",
+        flexShrink: 0,
       }}>
-        <span style={{ color: "#00f5ff", fontSize: 15, fontWeight: "bold", letterSpacing: 3 }}>AI COMPANY HQ</span>
-        <span style={{ color: "#334", fontSize: 11 }}>|</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+        <span style={{ color: "#00f5ff", fontSize: 14, fontWeight: "bold", letterSpacing: 3 }}>AI COMPANY HQ</span>
+        <span style={{ color: "#334", fontSize: 11 }}>·</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11 }}>
           <span style={{
-            width: 8, height: 8, borderRadius: "50%", display: "inline-block",
+            width: 7, height: 7, borderRadius: "50%", display: "inline-block",
             background: isConnected ? "#00ff88" : "#ff5252",
-            boxShadow: isConnected ? "0 0 6px #00ff88" : "none",
+            boxShadow: isConnected ? "0 0 5px #00ff88" : "none",
           }}/>
           <span style={{ color: isConnected ? "#00ff88" : "#ff5252" }}>
             {isConnected ? "CONECTADO" : "DESCONECTADO"}
@@ -206,61 +71,135 @@ export default function OfficePage() {
         </span>
         {active > 0 && (
           <span style={{
-            color: "#00ff88", fontSize: 11,
-            background: "#00ff8820", border: "1px solid #00ff8840",
-            padding: "2px 10px", borderRadius: 20,
+            color: "#00ff88", fontSize: 10,
+            background: "#00ff8818", border: "1px solid #00ff8835",
+            padding: "2px 8px", borderRadius: 20,
           }}>
-            {active} agente{active > 1 ? "s" : ""} activo{active > 1 ? "s" : ""}
+            {active} activo{active > 1 ? "s" : ""}
           </span>
         )}
-        <Link href="/" style={{ marginLeft: "auto", color: "#334", fontSize: 11, textDecoration: "none", pointerEvents: "all" }}>
+        <Link href="/" style={{ marginLeft: "auto", color: "#667", fontSize: 11, textDecoration: "none" }}>
           ← Dashboard
         </Link>
       </div>
 
+      {/* Main content */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+
+        {/* Pixel office canvas */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{
+            width: "100%", maxWidth: 700,
+            aspectRatio: "4/3",
+            border: "2px solid rgba(0,245,255,0.2)",
+            borderRadius: 4,
+            overflow: "hidden",
+            boxShadow: "0 0 30px rgba(0,245,255,0.08)",
+          }}>
+            <PixelOffice
+              agentStates={agentStates}
+              onRoomClick={(crew) => setSelected(crew === selected ? null : crew)}
+            />
+          </div>
+        </div>
+
+        {/* Right sidebar: crew status */}
+        <div style={{
+          width: 220, flexShrink: 0,
+          display: "flex", flexDirection: "column", gap: 6,
+          padding: "12px 10px",
+          borderLeft: "1px solid rgba(255,255,255,0.06)",
+          overflowY: "auto",
+        }}>
+          <div style={{ color: "#667", fontSize: 9, letterSpacing: 2, marginBottom: 4 }}>AGENTES</div>
+          {crews.map(([key, info]) => {
+            const st = agentStates[key as keyof typeof agentStates];
+            const sc = statusColor(st?.status ?? "idle");
+            const isWorking = st?.status === "working";
+            return (
+              <div
+                key={key}
+                onClick={() => setSelected(key === selected ? null : key)}
+                style={{
+                  background: selected === key ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.025)",
+                  border: `1px solid ${selected === key ? info.color + "60" : "rgba(255,255,255,0.07)"}`,
+                  borderRadius: 6, padding: "8px 10px", cursor: "pointer",
+                  transition: "all 0.15s",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ color: info.color, fontSize: 10, fontWeight: "bold" }}>{info.label.toUpperCase()}</span>
+                  <span style={{
+                    marginLeft: "auto", fontSize: 8, padding: "1px 5px", borderRadius: 10,
+                    background: sc + "20", color: sc,
+                  }}>
+                    {st?.status ?? "idle"}
+                  </span>
+                </div>
+                <div style={{ color: "#667", fontSize: 8, marginTop: 2 }}>{info.room}</div>
+                {st?.currentTask && (
+                  <div style={{ color: "#aab", fontSize: 8, marginTop: 4, lineHeight: 1.5 }}>
+                    {st.currentTask.slice(0, 50)}{st.currentTask.length > 50 ? "…" : ""}
+                  </div>
+                )}
+                {isWorking && (
+                  <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
+                    {[0,1,2].map(j => (
+                      <div key={j} style={{
+                        width: 3, height: 3, borderRadius: "50%", background: "#00ff88",
+                        animation: `dot-pulse 1s ${j*0.3}s infinite ease-in-out`,
+                      }}/>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Last event log */}
+          {events.length > 0 && (
+            <div style={{ marginTop: 8, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8 }}>
+              <div style={{ color: "#667", fontSize: 9, letterSpacing: 2, marginBottom: 4 }}>ÚLTIMO EVENTO</div>
+              <div style={{ color: "#4ecdc4", fontSize: 8, lineHeight: 1.6 }}>
+                [{events[0].timestamp.slice(11,19)}]<br/>
+                <span style={{ color: "#aab" }}>{events[0].crew}/{events[0].agent}</span><br/>
+                {events[0].status}
+                {events[0].output ? `: ${events[0].output.slice(0,60)}…` : ""}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Bottom command bar */}
       <div style={{
-        position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 20,
-        padding: "14px 20px",
-        background: "linear-gradient(to top, rgba(2,2,16,0.95), transparent)",
+        padding: "10px 16px",
+        background: "rgba(10,10,22,0.98)",
+        borderTop: "1px solid rgba(0,245,255,0.12)",
+        flexShrink: 0,
       }}>
-        {events.length > 0 && (
-          <div style={{ marginBottom: 6, color: "#4ecdc4", fontSize: 10 }}>
-            [{events[0].timestamp.slice(11,19)}] {events[0].crew}/{events[0].agent} — {events[0].status}
-            {events[0].output ? ` · ${events[0].output.slice(0,70)}…` : ""}
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: 8 }}>
           <input
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") handleSend(); }}
             placeholder="Escribe una instrucción para tus agentes…"
             style={{
-              flex: 1, background: "rgba(255,255,255,0.05)",
-              border: "1px solid rgba(0,245,255,0.2)", borderRadius: 8,
-              padding: "10px 14px", color: "#fff", fontSize: 13, outline: "none", fontFamily: "monospace",
+              flex: 1, background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(0,245,255,0.18)", borderRadius: 6,
+              padding: "8px 12px", color: "#fff", fontSize: 12, outline: "none", fontFamily: "monospace",
             }}
           />
           <button onClick={handleSend} disabled={sending || !input.trim()} style={{
-            background: sending || !input.trim() ? "rgba(0,245,255,0.08)" : "rgba(0,245,255,0.18)",
-            border: "1px solid rgba(0,245,255,0.35)", borderRadius: 8,
-            color: "#00f5ff", padding: "10px 24px", cursor: "pointer",
-            fontSize: 13, fontFamily: "monospace", letterSpacing: 1,
+            background: sending || !input.trim() ? "rgba(0,245,255,0.06)" : "rgba(0,245,255,0.16)",
+            border: "1px solid rgba(0,245,255,0.3)", borderRadius: 6,
+            color: "#00f5ff", padding: "8px 20px", cursor: "pointer",
+            fontSize: 12, fontFamily: "monospace", letterSpacing: 1,
           }}>
             {sending ? "ENVIANDO…" : "ENVIAR"}
           </button>
         </div>
       </div>
-
-      {/* Crosshair */}
-      {locked && (
-        <div style={{
-          position: "absolute", top: "50%", left: "50%",
-          transform: "translate(-50%,-50%)", zIndex: 15,
-          pointerEvents: "none", color: "rgba(255,255,255,0.5)", fontSize: 18,
-        }}>+</div>
-      )}
 
       <style>{`
         @keyframes dot-pulse {

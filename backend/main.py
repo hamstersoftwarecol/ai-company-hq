@@ -1,26 +1,25 @@
 import asyncio
+import logging
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from config import get_settings, save_api_keys
+from config import save_api_keys
 from events.ws_manager import ws_manager
 from orchestrator.ceo_agent import process_instruction
-from orchestrator.task_router import route_task
-from crews.marketing_crew import MarketingCrew
-from crews.frontend_crew import FrontendCrew
-from crews.backend_crew import BackendCrew
-from crews.mobile_crew import MobileCrew
-from crews.images_crew import ImagesCrew
-from crews.planning_crew import PlanningCrew
+from mcp_servers.crew_server import get_server, set_ws_manager
+
+CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Keys may be absent at startup; user can configure via /settings endpoint
+    # Wire ws_manager into MCP crew server so crew tools can broadcast events
+    set_ws_manager(ws_manager)
+    get_server()  # pre-build the MCP server
     yield
 
 
@@ -33,16 +32,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CREW_MAP: dict[str, Any] = {
-    "marketing": MarketingCrew,
-    "frontend": FrontendCrew,
-    "backend": BackendCrew,
-    "mobile": MobileCrew,
-    "images": ImagesCrew,
-    "planning": PlanningCrew,
+agent_states: dict[str, dict] = {
+    name: {"crew": name, "status": "idle", "currentTask": "", "lastOutput": "", "modelUsed": ""}
+    for name in CREW_NAMES
 }
-
-agent_states: dict[str, dict] = {name: {"crew": name, "status": "idle", "currentTask": "", "lastOutput": "", "modelUsed": ""} for name in CREW_MAP}
 task_history: list[dict] = []
 
 
@@ -65,7 +58,6 @@ async def get_settings_status() -> dict:
     import os
     ant = os.getenv("ANTHROPIC_API_KEY", "")
     oai = os.getenv("OPENAI_API_KEY", "")
-    # Placeholders in .env.example / default files are not real keys
     _PLACEHOLDERS = {"", "sk-ant-...", "sk-...", "your-key-here"}
     ant_ok = bool(ant and ant not in _PLACEHOLDERS and len(ant) > 20)
     oai_ok = bool(oai and oai not in _PLACEHOLDERS and len(oai) > 20)
@@ -114,22 +106,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 async def _run_task(task_id: str, instruction: str) -> None:
     task_history.append({"task_id": task_id, "instruction": instruction, "status": "running"})
     try:
-        await process_instruction(instruction, ws_manager)
-        pairs = route_task(instruction)
-        for crew_name, subtask in pairs:
-            crew_cls = CREW_MAP.get(crew_name)
-            if crew_cls:
-                crew = crew_cls(ws_manager=ws_manager)
-                agent_states[crew_name]["status"] = "working"
-                agent_states[crew_name]["currentTask"] = subtask
-                result = await crew.execute(subtask)
-                agent_states[crew_name]["status"] = "complete"
-                agent_states[crew_name]["lastOutput"] = result[:500]
+        # CEO plans and dispatches crews via MCP tools
+        result = await process_instruction(instruction, ws_manager)
         for entry in task_history:
             if entry["task_id"] == task_id:
                 entry["status"] = "complete"
+                entry["result"] = result[:500]
     except Exception as exc:
-        import logging
         logging.exception("Task %s failed: %s", task_id, exc)
         for entry in task_history:
             if entry["task_id"] == task_id:
