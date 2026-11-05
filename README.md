@@ -13,8 +13,11 @@ Una oficina virtual en pixel art, con estilo de videojuego en modo claro, para d
   - **Error:** monitor con `!` y globo `!`.
 - **Darle una tarea a un agente concreto.** Haz clic en él (en la oficina o en la lista *Equipo*), escribe la tarea y pulsa **ENVIAR**. La tarea va directa a ese equipo.
 - **Dejar que el CEO decida.** Con el CEO seleccionado, él elige qué equipos hacen falta y reparte el trabajo.
+- **Responder las preguntas antes de empezar.** Antes de trabajar, el CEO te hace hasta 3 preguntas de aclaración sobre tu tarea y **siempre** te pregunta en qué carpeta se desarrollará el proyecto. Si asignas la tarea directo a un agente, te pregunta la carpeta. La tarea espera a que respondas, y la tarjeta de preguntas sigue ahí aunque recargues la página.
 - **Seguir todo en el panel de control.** Modelo en uso, tarea actual, último resultado, registro de actividad y tareas enviadas.
 - **Usarlo desde el móvil.** El diseño se apila en una sola columna.
+
+![Preguntas del CEO antes de empezar](docs/images/office-questions.png)
 
 ![Agentes trabajando](docs/images/office-working.png)
 
@@ -48,6 +51,7 @@ Navegador (Next.js)  ──HTTP──▶  FastAPI  ──▶  CEO ──┐
 - **Backend:** FastAPI. `POST /task` recibe la tarea y devuelve enseguida; el avance llega por el WebSocket `/ws`.
 - **MCP entre equipos:** cada crew es una herramienta de un servidor [fastmcp](https://gofastmcp.com). El CEO y la asignación directa llaman a esas herramientas con un cliente en proceso (`dispatch_to_crew`).
 - **CEO autónomo:** trabaja por rondas. Cada ronda decide qué equipos llamar, los lanza en paralelo por MCP y recibe sus resultados. Los equipos de las rondas siguientes reciben como contexto lo que ya entregaron los demás (por ejemplo, Planning antes que Backend y Frontend). Termina cuando considera que el trabajo está cubierto o tras `CEO_MAX_ROUNDS` rondas (3 por defecto). Las respuestas de los agentes se limitan a `AGENT_MAX_WORDS` palabras (400 por defecto) para que la coordinación sea rápida.
+- **Carpeta del proyecto:** con `LLM_PROVIDER=claude-code`, los agentes crean y editan archivos reales dentro de la carpeta que elijas, cada equipo en su subcarpeta (`frontend/`, `backend/`, `mobile/`, `marketing/`, `images/` y `docs/` para Planning). Solo tienen herramientas de archivos (leer, escribir, editar, buscar), sin terminal, y no pueden escribir fuera de esa carpeta. La carpeta debe estar dentro de tu carpeta personal (`~`); se rechazan `~` mismo, las carpetas ocultas y `~/Library`. Con otros proveedores los agentes solo devuelven texto.
 - **Enrutador de modelos:** según el agente usa Claude (críticos), GPT-4o (estándar) u Ollama local (tareas ligeras). Ver `backend/model_router/router.py`.
 - **Errores visibles:** si la llamada al modelo falla, el agente pasa a estado de error y muestra el mensaje real, en vez de quedarse "trabajando".
 
@@ -112,8 +116,10 @@ El repositorio incluye un servidor MCP por stdio ([`.mcp.json`](.mcp.json)) que 
 | `GET` / `POST` | `/settings` | Consulta o guarda las API keys (sin pantalla en la interfaz; se editan en `backend/.env`). |
 | `GET` | `/agents` | Estado actual de los agentes. |
 | `GET` | `/history` | Tareas enviadas. |
-| `POST` | `/task` | `{ "instruction": "...", "crew": "backend" }`. Sin `crew`, lo gestiona el CEO. |
-| `WS` | `/ws` | Eventos de los agentes en tiempo real. |
+| `POST` | `/task` | `{ "instruction": "...", "crew": "backend" }`. Sin `crew`, lo gestiona el CEO. La tarea queda esperando tus respuestas. |
+| `GET` | `/pending` | Tareas que esperan respuestas. |
+| `POST` | `/task/{id}/answers` | `{ "answers": { "folder": "~/mi-proyecto", "q1": "..." } }`. Valida la carpeta y la crea si no existe. |
+| `WS` | `/ws` | Eventos de los agentes en tiempo real y mensajes `questions` / `questions_resolved`. |
 
 ## Estructura
 

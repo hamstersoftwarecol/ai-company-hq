@@ -21,3 +21,15 @@ export interface AgentState {
   lastOutput: string;
   modelUsed: string;
 }
+
+export interface Question {
+  id: string;
+  kind: "text" | "folder";
+  question: string;
+}
+
+export interface PendingQuestions {
+  task_id: string;
+  instruction: string;
+  questions: Question[];
+}

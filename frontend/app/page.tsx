@@ -6,6 +6,7 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { sendTask } from "@/lib/api";
 import { AGENT_BY_KEY } from "@/lib/office";
 import type { AgentKey } from "@/types/agent";
+import QuestionsCard from "@/components/QuestionsCard";
 import ControlPanel, { type HistoryEntry } from "@/components/ControlPanel";
 
 const PixelOffice = dynamic(() => import("@/components/PixelOffice"), { ssr: false });
@@ -13,7 +14,7 @@ const PixelOffice = dynamic(() => import("@/components/PixelOffice"), { ssr: fal
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
 
 export default function OfficePage() {
-  const { events, agentStates, isConnected } = useWebSocket(WS_URL);
+  const { events, agentStates, isConnected, pending, dismissPending } = useWebSocket(WS_URL);
   const [selected, setSelected] = useState<AgentKey>("orchestrator");
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -68,6 +69,8 @@ export default function OfficePage() {
           <div className="px-panel p-2">
             <PixelOffice agentStates={agentStates} selected={selected} onSelect={setSelected} />
           </div>
+
+          {pending.length > 0 && <QuestionsCard key={pending[0].task_id} pending={pending[0]} onAnswered={dismissPending} />}
 
           {/* Command bar */}
           <div className="px-panel flex flex-col gap-3 p-3">

@@ -45,7 +45,7 @@ async def test_ceo_runs_rounds_and_passes_context_between_crews():
         {"calls": [{"crew": "backend", "task": "api"}, {"crew": "frontend", "task": "ui"}], "done": False, "summary": ""},
         {"calls": [], "done": True, "summary": "Todo listo"},
     ]
-    dispatch = AsyncMock(side_effect=lambda crew, task: f"{crew}-output")
+    dispatch = AsyncMock(side_effect=lambda crew, task, *_: f"{crew}-output")
     with patch("orchestrator.ceo_agent._decide", AsyncMock(side_effect=decisions)), \
          patch("orchestrator.ceo_agent.dispatch_to_crew", dispatch):
         result = await process_instruction("Lanzar la campaña", manager)
@@ -90,4 +90,43 @@ async def test_ceo_emits_error_when_every_crew_fails():
          patch("orchestrator.ceo_agent.dispatch_to_crew", AsyncMock(side_effect=RuntimeError("boom"))):
         with pytest.raises(RuntimeError, match="boom"):
             await process_instruction("x", manager)
+    assert _statuses(manager)[-1] == "error"
+
+
+@pytest.mark.asyncio
+async def test_ceo_asks_questions_then_works_in_the_chosen_folder():
+    manager = AsyncMock(spec=WSManager)
+    asked = {}
+
+    async def ask(questions):
+        asked["questions"] = questions
+        return {"q1": "Pymes de Colombia", "folder": "/home/u/proyecto"}
+
+    decisions = [
+        {"calls": [{"crew": "backend", "task": "api"}], "done": False, "summary": ""},
+        {"calls": [], "done": True, "summary": "ok"},
+    ]
+    dispatch = AsyncMock(return_value="out")
+    decide = AsyncMock(side_effect=decisions)
+    with patch("orchestrator.ceo_agent.clarifying_questions", AsyncMock(return_value=[{"id": "q1", "kind": "text", "question": "¿Público?"}])), \
+         patch("orchestrator.ceo_agent._decide", decide), \
+         patch("orchestrator.ceo_agent.dispatch_to_crew", dispatch):
+        await process_instruction("Crear una app", manager, ask=ask)
+
+    assert [q["id"] for q in asked["questions"]] == ["q1", "folder"]          # folder is always asked
+    assert dispatch.call_args_list[0].args[2] == "/home/u/proyecto"           # crews work in that folder
+    assert "Pymes de Colombia" in decide.call_args_list[0].args[1]            # CEO sees the answers
+    assert _statuses(manager)[-1] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_ceo_reports_error_if_the_questions_step_fails():
+    manager = AsyncMock(spec=WSManager)
+
+    async def ask(questions):
+        raise RuntimeError("cancelado")
+
+    with patch("orchestrator.ceo_agent.clarifying_questions", AsyncMock(return_value=[])):
+        with pytest.raises(RuntimeError, match="cancelado"):
+            await process_instruction("x", manager, ask=ask)
     assert _statuses(manager)[-1] == "error"

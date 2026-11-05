@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import re
+from collections.abc import Awaitable, Callable
 
 import llm
 from fastmcp import Client
@@ -21,6 +22,7 @@ from events.ws_manager import WSManager
 from crews.base_crew import BaseCrew
 from model_router.router import get_model_for_agent
 from mcp_servers.crew_server import get_server
+from orchestrator.clarify import FOLDER_QUESTION, clarifying_questions, format_answers
 
 CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]
 
@@ -133,7 +135,21 @@ async def _decide(model: str, instruction: str, delivered: list[dict]) -> dict |
     return None
 
 
-async def process_instruction(instruction: str, ws_manager: WSManager) -> str:
+AskUser = Callable[[list[dict]], Awaitable[dict[str, str]]]
+
+
+async def process_instruction(
+    instruction: str,
+    ws_manager: WSManager,
+    ask: AskUser | None = None,
+    project_dir: str | None = None,
+) -> str:
+    """Run an instruction end to end.
+
+    If `ask` is given, the CEO first asks the user clarifying questions plus the
+    project folder (`ask` receives the questions and returns the answers, with the
+    folder under "folder"). Crews then work inside that folder.
+    """
     base = BaseCrew(ws_manager=ws_manager)
     base.crew_name = "orchestrator"
     model = get_model_for_agent("ceo_agent")
@@ -142,6 +158,24 @@ async def process_instruction(instruction: str, ws_manager: WSManager) -> str:
         agent="ceo_agent", status="working",
         task=instruction, output="", model_used=model,
     )
+
+    if ask is not None:
+        try:
+            questions = await clarifying_questions(model, instruction) + [FOLDER_QUESTION]
+            await base.emit_event(
+                agent="ceo_agent", status="working", task=instruction, model_used=model,
+                output="Esperando tus respuestas…",
+            )
+            answers = await ask(questions)
+        except Exception as exc:
+            await base.emit_event(
+                agent="ceo_agent", status="error", task=instruction, output=str(exc), model_used=model,
+            )
+            raise
+        project_dir = answers.get("folder") or project_dir
+        extra = format_answers(questions, answers)
+        if extra:
+            instruction = f"{instruction}\n\nRespuestas del usuario a las preguntas del CEO:\n{extra}"
 
     delivered: list[dict] = []   # {crew, task, output, error}
     seen: set[tuple[str, str]] = set()
@@ -170,7 +204,7 @@ async def process_instruction(instruction: str, ws_manager: WSManager) -> str:
                 output=f"Ronda {round_no}: " + ", ".join(c for c, _ in calls),
             )
             results = await asyncio.gather(
-                *(dispatch_to_crew(crew, _task_with_context(task, delivered)) for crew, task in calls),
+                *(dispatch_to_crew(crew, _task_with_context(task, delivered), project_dir) for crew, task in calls),
                 return_exceptions=True,
             )
             failures = [r for r in results if isinstance(r, BaseException)]
@@ -196,10 +230,13 @@ async def process_instruction(instruction: str, ws_manager: WSManager) -> str:
     return final
 
 
-async def dispatch_to_crew(crew: str, task: str) -> str:
+async def dispatch_to_crew(crew: str, task: str, project_dir: str | None = None) -> str:
     """Call one crew's MCP tool directly (used by the CEO and by direct assignment)."""
     if crew not in CREW_NAMES:
         raise ValueError(f"Unknown crew: {crew}")
+    args = {"task": task}
+    if project_dir:
+        args["project_dir"] = project_dir
     async with Client(get_server()) as client:
-        result = await client.call_tool(crew, {"task": task})
+        result = await client.call_tool(crew, args)
     return " ".join(c.text for c in result.content if hasattr(c, "text"))

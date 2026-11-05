@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from config import save_api_keys
 from events.ws_manager import ws_manager
 from orchestrator.ceo_agent import dispatch_to_crew, process_instruction
+from orchestrator.clarify import FOLDER_QUESTION, pending
 from mcp_servers.crew_server import get_server, set_ws_manager
 
 CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]
@@ -42,6 +43,10 @@ task_history: list[dict] = []
 class TaskRequest(BaseModel):
     instruction: str
     crew: str | None = None
+
+
+class AnswersRequest(BaseModel):
+    answers: dict[str, str]
 
 
 class SettingsRequest(BaseModel):
@@ -95,6 +100,27 @@ async def post_task(body: TaskRequest) -> dict:
     return {"task_id": task_id}
 
 
+@app.get("/pending")
+async def get_pending() -> list:
+    """Tasks that are waiting for the user to answer the agents' questions."""
+    return pending.list()
+
+
+@app.post("/task/{task_id}/answers")
+async def post_answers(task_id: str, body: AnswersRequest) -> dict:
+    try:
+        answers = pending.answer(task_id, body.answers)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Esa tarea no está esperando respuestas.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    for entry in task_history:
+        if entry["task_id"] == task_id:
+            entry["status"] = "running"
+            entry["folder"] = answers.get("folder")
+    return {"status": "ok", "folder": answers.get("folder")}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
@@ -107,14 +133,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
 
 async def _run_task(task_id: str, instruction: str, crew: str | None = None) -> None:
-    task_history.append({"task_id": task_id, "instruction": instruction, "crew": crew, "status": "running"})
+    task_history.append({"task_id": task_id, "instruction": instruction, "crew": crew, "status": "waiting"})
     try:
         if crew:
-            # Direct assignment: skip the CEO and call that crew's MCP tool
-            result = await dispatch_to_crew(crew, instruction)
+            # Direct assignment: ask for the project folder, then call that crew's MCP tool
+            answers = await pending.ask(task_id, instruction, [FOLDER_QUESTION], ws_manager)
+            result = await dispatch_to_crew(crew, instruction, answers["folder"])
         else:
-            # CEO plans and dispatches crews via MCP tools
-            result = await process_instruction(instruction, ws_manager)
+            # CEO asks its questions (and the folder), then plans and dispatches crews via MCP tools
+            async def ask(questions: list[dict]) -> dict[str, str]:
+                return await pending.ask(task_id, instruction, questions, ws_manager)
+
+            result = await process_instruction(instruction, ws_manager, ask=ask)
         for entry in task_history:
             if entry["task_id"] == task_id:
                 entry["status"] = "complete"

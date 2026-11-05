@@ -1,3 +1,5 @@
+import json
+
 from fastapi import WebSocket
 from events.schemas import AgentEvent
 
@@ -15,6 +17,15 @@ class WSManager:
 
     async def broadcast(self, event: AgentEvent) -> None:
         payload = event.model_dump_json()
+        for ws in list(self.active_connections):
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                await self.disconnect(ws)
+
+    async def broadcast_json(self, data: dict) -> None:
+        """Send a non-agent message (e.g. questions for the user) to every client."""
+        payload = json.dumps(data)
         for ws in list(self.active_connections):
             try:
                 await ws.send_text(payload)

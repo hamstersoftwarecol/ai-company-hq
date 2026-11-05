@@ -106,12 +106,17 @@ async def _call_claude_code(model: str, messages: list[dict], **kwargs: Any) -> 
     prompt = "\n\n".join(turns)
 
     cli_model = model if model.startswith("claude") else os.environ.get("CLAUDE_CODE_MODEL", "sonnet")
+    # With a project folder the agent may read/write files there (and only there:
+    # edits outside the working directory are not auto-approved). No shell access.
+    cwd = kwargs.get("cwd")
+    tools = "Read,Write,Edit,Glob,Grep" if cwd else ""
     cmd = [
         os.environ.get("CLAUDE_CODE_BIN", "claude"), "-p",
         "--output-format", "json",
         "--model", cli_model,
         "--system-prompt", system,
-        "--tools", "",
+        "--tools", tools,
+        *(["--permission-mode", "acceptEdits"] if cwd else []),
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         "--disable-slash-commands", "--no-session-persistence",
         "--setting-sources", "",
@@ -123,7 +128,7 @@ async def _call_claude_code(model: str, messages: list[dict], **kwargs: Any) -> 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            cwd=tempfile.gettempdir(), env=env,
+            cwd=cwd or tempfile.gettempdir(), env=env,
         )
     except FileNotFoundError as exc:
         raise RuntimeError("No se encontró el comando `claude`. Instala Claude Code e inicia sesión.") from exc
