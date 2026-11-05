@@ -13,7 +13,7 @@ Una oficina virtual en pixel art, con estilo de videojuego en modo claro, para d
   - **Error:** monitor con `!` y globo `!`.
 - **Darle una tarea a un agente concreto.** Haz clic en él (en la oficina o en la lista *Equipo*), escribe la tarea y pulsa **ENVIAR**. La tarea va directa a ese equipo.
 - **Dejar que el CEO decida.** Con el CEO seleccionado, él elige qué equipos hacen falta y reparte el trabajo.
-- **Responder las preguntas antes de empezar.** Antes de trabajar, el CEO te hace hasta 3 preguntas de aclaración sobre tu tarea y **siempre** te pregunta en qué carpeta se desarrollará el proyecto. Si asignas la tarea directo a un agente, te pregunta la carpeta. La tarea espera a que respondas, y la tarjeta de preguntas sigue ahí aunque recargues la página. Para la carpeta, pulsa **ELEGIR…**: un explorador te deja navegar por tus carpetas, crear una nueva y elegirla, sin escribir la ruta.
+- **Responder las preguntas antes de empezar.** Antes de trabajar, el CEO te hace hasta 3 preguntas de aclaración sobre tu tarea y **siempre** te pregunta en qué carpeta se desarrollará el proyecto. Si asignas la tarea directo a un agente, te pregunta la carpeta. La tarea espera a que respondas, y la tarjeta de preguntas sigue ahí aunque recargues la página. Si no quieres seguir, **CANCELAR TAREA** la descarta. Para la carpeta, pulsa **ELEGIR…**: un explorador te deja navegar por tus carpetas, crear una nueva y elegirla, sin escribir la ruta.
 - **Seguir todo en el panel de control.** Modelo en uso, tarea actual, último resultado, registro de actividad y tareas enviadas.
 - **Usarlo desde el móvil.** El diseño se apila en una sola columna.
 
@@ -55,6 +55,8 @@ Navegador (Next.js)  ──HTTP──▶  FastAPI  ──▶  CEO ──┐
 - **CEO autónomo:** trabaja por rondas. Cada ronda decide qué equipos llamar, los lanza en paralelo por MCP y recibe sus resultados. Los equipos de las rondas siguientes reciben como contexto lo que ya entregaron los demás (por ejemplo, Planning antes que Backend y Frontend). Termina cuando considera que el trabajo está cubierto o tras `CEO_MAX_ROUNDS` rondas (3 por defecto). Las respuestas de los agentes se limitan a `AGENT_MAX_WORDS` palabras (400 por defecto) para que la coordinación sea rápida.
 - **Carpeta del proyecto:** con `LLM_PROVIDER=claude-code`, los agentes crean y editan archivos reales dentro de la carpeta que elijas, cada equipo en su subcarpeta (`frontend/`, `backend/`, `mobile/`, `marketing/`, `images/` y `docs/` para Planning). Solo tienen herramientas de archivos (leer, escribir, editar, buscar), sin terminal, y no pueden escribir fuera de esa carpeta. La carpeta debe estar dentro de tu carpeta personal (`~`); se rechazan `~` mismo, las carpetas ocultas y `~/Library`. Con otros proveedores los agentes solo devuelven texto.
 - **Enrutador de modelos:** según el agente usa Claude (críticos), GPT-4o (estándar) u Ollama local (tareas ligeras). Ver `backend/model_router/router.py`.
+- **Historial persistente:** las tareas se guardan en `backend/data/history.json` (ignorado por git) y sobreviven a un reinicio del backend. Las que estaban en curso se marcan como *interrumpidas*. Las preguntas pendientes no sobreviven: hay que volver a enviar la tarea.
+- **Seguridad local:** el backend solo acepta peticiones y WebSockets de `http://localhost:3000` y `http://127.0.0.1:3000`; otras páginas web no pueden leer lo que hacen tus agentes. Para usar otro origen, define `ALLOWED_ORIGINS` (separados por comas) en `backend/.env`.
 - **Errores visibles:** si la llamada al modelo falla, el agente pasa a estado de error y muestra el mensaje real, en vez de quedarse "trabajando".
 
 ## Puesta en marcha
@@ -116,11 +118,12 @@ El repositorio incluye un servidor MCP por stdio ([`.mcp.json`](.mcp.json)) que 
 | --- | --- | --- |
 | `GET` | `/health` | Comprueba que el backend está vivo. |
 | `GET` / `POST` | `/settings` | Consulta o guarda las API keys (sin pantalla en la interfaz; se editan en `backend/.env`). |
-| `GET` | `/agents` | Estado actual de los agentes. |
-| `GET` | `/history` | Tareas enviadas. |
+| `GET` | `/agents` | Estado actual de los equipos, según sus últimos eventos. |
+| `GET` | `/history` | Tareas enviadas (persistentes). |
 | `POST` | `/task` | `{ "instruction": "...", "crew": "backend" }`. Sin `crew`, lo gestiona el CEO. La tarea queda esperando tus respuestas. |
 | `GET` / `POST` | `/folders` | Explorador de carpetas (solo dentro de `~`): lista subcarpetas, o crea una nueva con `{ "parent": "...", "name": "..." }`. |
 | `GET` | `/pending` | Tareas que esperan respuestas. |
+| `POST` | `/task/{id}/cancel` | Cancela una tarea que espera respuestas. |
 | `POST` | `/task/{id}/answers` | `{ "answers": { "folder": "~/mi-proyecto", "q1": "..." } }`. Valida la carpeta y la crea si no existe. |
 | `WS` | `/ws` | Eventos de los agentes en tiempo real y mensajes `questions` / `questions_resolved`. |
 

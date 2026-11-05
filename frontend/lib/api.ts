@@ -67,3 +67,26 @@ export async function createFolder(parent: string, name: string): Promise<{ path
   if (!res.ok) return failWith(res);
   return res.json();
 }
+
+/** Cancel a task that is still waiting for the user's answers. */
+export async function cancelTask(taskId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/task/${taskId}/cancel`, { method: "POST" });
+  if (!res.ok) return failWith(res);
+}
+
+export interface ServerTask {
+  task_id: string;
+  instruction: string;
+  crew: string | null;
+  status: string;
+  created_at?: string;
+  folder?: string | null;
+  error?: string;
+}
+
+/** Tasks the backend remembers (it keeps them across restarts). */
+export async function fetchHistory(): Promise<ServerTask[]> {
+  const res = await fetch(`${API_URL}/history`);
+  if (!res.ok) return failWith(res);
+  return res.json();
+}

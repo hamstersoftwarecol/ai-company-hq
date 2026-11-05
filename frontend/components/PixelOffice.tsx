@@ -319,12 +319,22 @@ const BUBBLE: Record<AgentStatus, { text: string; bg: string; fg: string }> = {
   idle:     { text: "zz",  bg: "#e5e7eb", fg: "#6b7280" },
 };
 
+const STATUS_ES: Record<AgentStatus, string> = {
+  working: "trabajando",
+  complete: "listo",
+  error: "con error",
+  idle: "libre",
+};
+
 export default function PixelOffice({ agentStates, selected, onSelect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const statesRef = useRef(agentStates);
   const selectedRef = useRef(selected);
-  statesRef.current = agentStates;
-  selectedRef.current = selected;
+  // Keep the animation loop's refs in sync (refs must not be written during render)
+  useEffect(() => {
+    statesRef.current = agentStates;
+    selectedRef.current = selected;
+  }, [agentStates, selected]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -362,7 +372,7 @@ export default function PixelOffice({ agentStates, selected, onSelect }: Props) 
           <button
             key={a.key}
             type="button"
-            aria-label={`${a.label}: ${st}`}
+            aria-label={`${a.label}: ${STATUS_ES[st]}`}
             onClick={() => onSelect(a.key)}
             className="absolute cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-black"
             style={{

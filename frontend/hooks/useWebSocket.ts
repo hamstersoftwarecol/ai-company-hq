@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { AgentEvent, AgentKey, AgentState, PendingQuestions } from "@/types/agent";
 import { fetchPending } from "@/lib/api";
 
@@ -15,65 +15,89 @@ export function useWebSocket(url: string) {
   const [agentStates, setAgentStates] = useState<Record<AgentKey, AgentState>>(DEFAULT_STATES);
   const [isConnected, setIsConnected] = useState(false);
   const [pending, setPending] = useState<PendingQuestions[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setIsConnected(true);
-      // Questions asked while this page was closed or reloading
-      fetchPending().then(setPending).catch(() => {});
-    };
-
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === "questions") {
-          setPending((prev) => [...prev.filter((p) => p.task_id !== data.task_id), data as PendingQuestions]);
-          return;
-        }
-        if (data.type === "questions_resolved") {
-          setPending((prev) => prev.filter((p) => p.task_id !== data.task_id));
-          return;
-        }
-        const event: AgentEvent = data;
-        if (!KEYS.includes(event.crew as AgentKey)) return;
-        setEvents((prev) => [...prev.slice(-199), event]);
-        setAgentStates((prev) => ({
-          ...prev,
-          [event.crew]: {
-            crew: event.crew as AgentKey,
-            status: event.status,
-            currentTask: event.task,
-            lastOutput: event.output,
-            modelUsed: event.model_used,
-          },
-        }));
-      } catch {
-        // ignore malformed events
-      }
-    };
-
-    ws.onclose = () => {
-      setIsConnected(false);
-      reconnectTimer.current = setTimeout(connect, 2000);
-    };
-
-    ws.onerror = () => ws.close();
-  }, [url]);
 
   useEffect(() => {
-    connect();
-    return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
-    };
-  }, [connect]);
+    // Everything lives inside the effect so a stale socket (React strict mode mounts
+    // twice in dev) can never touch state after cleanup.
+    let closed = false;
+    let ws: WebSocket | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-  return { events, agentStates, isConnected, pending, dismissPending: (id: string) => setPending((prev) => prev.filter((p) => p.task_id !== id)) };
+    const connect = () => {
+      const socket = new WebSocket(url);
+      ws = socket;
+
+      socket.onopen = () => {
+        if (closed) return;
+        setIsConnected(true);
+        // Questions asked while this page was closed or reloading
+        fetchPending()
+          .then((p) => !closed && setPending(p))
+          .catch(() => {});
+      };
+
+      socket.onmessage = (e) => {
+        if (closed) return;
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === "questions") {
+            setPending((prev) => [...prev.filter((p) => p.task_id !== data.task_id), data as PendingQuestions]);
+            return;
+          }
+          if (data.type === "questions_resolved") {
+            setPending((prev) => prev.filter((p) => p.task_id !== data.task_id));
+            return;
+          }
+          const event: AgentEvent = data;
+          if (!KEYS.includes(event.crew as AgentKey)) return;
+          setEvents((prev) => [...prev.slice(-199), event]);
+          setAgentStates((prev) => ({
+            ...prev,
+            [event.crew]: {
+              crew: event.crew as AgentKey,
+              status: event.status,
+              currentTask: event.task,
+              lastOutput: event.output,
+              modelUsed: event.model_used,
+            },
+          }));
+        } catch {
+          // ignore malformed events
+        }
+      };
+
+      socket.onclose = () => {
+        if (closed) return;
+        setIsConnected(false);
+        timer = setTimeout(connect, 2000);
+      };
+
+      socket.onerror = () => socket.close();
+    };
+
+    connect();
+
+    return () => {
+      closed = true;
+      if (timer) clearTimeout(timer);
+      if (ws) {
+        const socket = ws;
+        socket.onmessage = socket.onclose = socket.onerror = null;
+        if (socket.readyState === WebSocket.CONNECTING) {
+          // closing a socket that is still connecting logs a browser warning; close once it opens
+          socket.onopen = () => socket.close();
+        } else {
+          socket.onopen = null;
+          socket.close();
+        }
+      }
+    };
+  }, [url]);
+
+  const dismissPending = useCallback(
+    (id: string) => setPending((prev) => prev.filter((p) => p.task_id !== id)),
+    []
+  );
+
+  return { events, agentStates, isConnected, pending, dismissPending };
 }

@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { sendTask } from "@/lib/api";
+import { fetchHistory, sendTask } from "@/lib/api";
 import { AGENT_BY_KEY } from "@/lib/office";
 import type { AgentKey } from "@/types/agent";
 import QuestionsCard from "@/components/QuestionsCard";
@@ -24,17 +24,40 @@ export default function OfficePage() {
   const target = AGENT_BY_KEY[selected];
   const working = Object.values(agentStates).filter((s) => s.status === "working").length;
 
+  // The backend remembers the tasks (even across restarts): show what it reports.
+  const refreshHistory = useCallback(() => {
+    fetchHistory()
+      .then((tasks) =>
+        setHistory(
+          tasks
+            .slice(-20)
+            .reverse()
+            .map((t) => ({
+              id: t.task_id,
+              target: (t.crew ?? "orchestrator") as AgentKey,
+              instruction: t.instruction,
+              ts: t.created_at ? new Date(t.created_at).toLocaleTimeString() : "",
+              status: t.status,
+            }))
+        )
+      )
+      .catch(() => {});
+  }, []);
+
+  // On load, when the connection comes back, and (debounced) as agents report progress.
+  useEffect(() => {
+    const timer = setTimeout(refreshHistory, 400);
+    return () => clearTimeout(timer);
+  }, [refreshHistory, isConnected, events.length, pending.length]);
+
   async function handleSend() {
     const instruction = text.trim();
     if (!instruction || sending) return;
     setSending(true);
     setError("");
     try {
-      const { task_id } = await sendTask(instruction, selected === "orchestrator" ? undefined : selected);
-      setHistory((prev) => [
-        { id: task_id, target: selected, instruction, ts: new Date().toLocaleTimeString() },
-        ...prev,
-      ]);
+      await sendTask(instruction, selected === "orchestrator" ? undefined : selected);
+      refreshHistory();
       setText("");
     } catch {
       setError("No se pudo enviar. ¿Está el backend encendido en el puerto 8000?");

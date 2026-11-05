@@ -45,6 +45,10 @@ async def clarifying_questions(model: str, instruction: str) -> list[dict]:
     return questions
 
 
+class Cancelled(Exception):
+    """The user cancelled the task while it was waiting for answers."""
+
+
 class PendingQuestions:
     """Tasks waiting for the user's answers. The UI answers via POST /task/{id}/answers."""
 
@@ -74,6 +78,12 @@ class PendingQuestions:
         if not item["future"].done():
             item["future"].set_result(clean)
         return clean
+
+    def cancel(self, task_id: str) -> None:
+        """Cancel a task that is waiting for answers. Raises KeyError if it is not."""
+        item = self._items[task_id]
+        if not item["future"].done():
+            item["future"].set_exception(Cancelled("Tarea cancelada."))
 
     def list(self) -> list[dict]:
         return [{k: v for k, v in item.items() if k != "future"} for item in self._items.values()]

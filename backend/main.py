@@ -1,7 +1,12 @@
 import asyncio
+import json
 import logging
+import os
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,26 +15,79 @@ from pydantic import BaseModel
 from config import save_api_keys
 from events.ws_manager import ws_manager
 from orchestrator.ceo_agent import dispatch_to_crew, process_instruction
-from orchestrator.clarify import FOLDER_QUESTION, pending
+from orchestrator.clarify import FOLDER_QUESTION, Cancelled, pending
 from orchestrator.project import create_folder, list_folders
 from mcp_servers.crew_server import get_server, set_ws_manager
 
 CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]
 
 
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    if o.strip()
+]
+
+# Where finished/running tasks are remembered across backend restarts (not committed to git)
+HISTORY_PATH = Path(os.getenv("HISTORY_FILE", Path(__file__).parent / "data" / "history.json"))
+HISTORY_LIMIT = 200
+
+
+def _save_history() -> None:
+    try:
+        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mktemp(dir=HISTORY_PATH.parent, suffix=".tmp"))
+        tmp.write_text(json.dumps(task_history[-HISTORY_LIMIT:], ensure_ascii=False, indent=1))
+        tmp.replace(HISTORY_PATH)  # atomic: a crash never leaves a half-written file
+    except OSError:
+        logging.exception("Could not save the task history")
+
+
+def _load_history() -> None:
+    """Restore the history. Tasks that were in flight died with the old process."""
+    try:
+        items = json.loads(HISTORY_PATH.read_text())
+    except (OSError, ValueError):
+        return
+    for entry in items if isinstance(items, list) else []:
+        if entry.get("status") in ("waiting", "running"):
+            entry["status"] = "interrupted"
+            entry["error"] = "Interrumpida por un reinicio del backend."
+        task_history.append(entry)
+
+
+def _update_task(task_id: str, **fields) -> None:
+    for entry in task_history:
+        if entry["task_id"] == task_id:
+            entry.update(fields)
+    _save_history()
+
+
+def _track_agent_state(event) -> None:
+    """Keep GET /agents in sync with the events the agents emit."""
+    if event.crew in agent_states:
+        agent_states[event.crew] = {
+            "crew": event.crew, "status": event.status, "currentTask": event.task,
+            "lastOutput": event.output, "modelUsed": event.model_used,
+        }
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Wire ws_manager into MCP crew server so crew tools can broadcast events
     set_ws_manager(ws_manager)
+    ws_manager.listeners.append(_track_agent_state)
     get_server()  # pre-build the MCP server
+    _load_history()
     yield
+    ws_manager.listeners.remove(_track_agent_state)
 
 
 app = FastAPI(title="AI Company HQ", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -39,6 +97,7 @@ agent_states: dict[str, dict] = {
     for name in CREW_NAMES
 }
 task_history: list[dict] = []
+_background_tasks: set[asyncio.Task] = set()
 
 
 class TaskRequest(BaseModel):
@@ -102,7 +161,10 @@ async def post_task(body: TaskRequest) -> dict:
     if body.crew is not None and body.crew not in CREW_NAMES:
         raise HTTPException(status_code=400, detail=f"Unknown crew: {body.crew}")
     task_id = str(uuid.uuid4())
-    asyncio.create_task(_run_task(task_id, body.instruction, body.crew))
+    # keep a reference: a bare asyncio.create_task() can be garbage-collected mid-run
+    task = asyncio.create_task(_run_task(task_id, body.instruction, body.crew))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return {"task_id": task_id}
 
 
@@ -138,15 +200,29 @@ async def post_answers(task_id: str, body: AnswersRequest) -> dict:
         raise HTTPException(status_code=404, detail="Esa tarea no está esperando respuestas.")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    for entry in task_history:
-        if entry["task_id"] == task_id:
-            entry["status"] = "running"
-            entry["folder"] = answers.get("folder")
+    _update_task(task_id, status="running", folder=answers.get("folder"))
     return {"status": "ok", "folder": answers.get("folder")}
+
+
+@app.post("/task/{task_id}/cancel")
+async def post_cancel(task_id: str) -> dict:
+    """Cancel a task that is still waiting for the user's answers."""
+    try:
+        pending.cancel(task_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Esa tarea no está esperando respuestas.")
+    return {"status": "cancelled"}
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    # Browsers do not apply CORS to WebSockets, so check the Origin ourselves:
+    # otherwise any web page the user visits could read the agents' tasks and output.
+    # Non-browser clients (scripts, tests) send no Origin and are allowed.
+    origin = ws.headers.get("origin")
+    if origin is not None and origin not in ALLOWED_ORIGINS:
+        await ws.close(code=1008)
+        return
     await ws.accept()
     await ws_manager.connect(ws)
     try:
@@ -157,7 +233,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
 
 async def _run_task(task_id: str, instruction: str, crew: str | None = None) -> None:
-    task_history.append({"task_id": task_id, "instruction": instruction, "crew": crew, "status": "waiting"})
+    task_history.append({
+        "task_id": task_id, "instruction": instruction, "crew": crew, "status": "waiting",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _save_history()
     try:
         if crew:
             # Direct assignment: ask for the project folder, then call that crew's MCP tool
@@ -169,13 +249,9 @@ async def _run_task(task_id: str, instruction: str, crew: str | None = None) -> 
                 return await pending.ask(task_id, instruction, questions, ws_manager)
 
             result = await process_instruction(instruction, ws_manager, ask=ask)
-        for entry in task_history:
-            if entry["task_id"] == task_id:
-                entry["status"] = "complete"
-                entry["result"] = result[:500]
+        _update_task(task_id, status="complete", result=result[:500])
+    except Cancelled:
+        _update_task(task_id, status="cancelled")
     except Exception as exc:
         logging.exception("Task %s failed: %s", task_id, exc)
-        for entry in task_history:
-            if entry["task_id"] == task_id:
-                entry["status"] = "error"
-                entry["error"] = str(exc)
+        _update_task(task_id, status="error", error=str(exc))

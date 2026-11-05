@@ -8,7 +8,18 @@ export interface HistoryEntry {
   target: AgentKey;
   instruction: string;
   ts: string;
+  /** Task status as the backend reports it (waiting, running, complete, error, cancelled, interrupted). */
+  status?: string;
 }
+
+const TASK_STATUS_LABEL: Record<string, string> = {
+  waiting: "ESPERANDO RESPUESTAS",
+  running: "EN CURSO",
+  complete: "LISTA",
+  error: "CON ERROR",
+  cancelled: "CANCELADA",
+  interrupted: "INTERRUMPIDA",
+};
 
 const STATUS_LABEL: Record<AgentStatus, string> = {
   working: "TRABAJANDO",
@@ -146,6 +157,9 @@ export default function ControlPanel({ agentStates, selected, onSelect, events, 
               <li key={h.id} className="bg-[#faf6ee] px-2 py-1.5 text-xs">
                 <span className="font-mono text-[#9a8d80]">{h.ts}</span>{" "}
                 <b style={{ color: AGENT_BY_KEY[h.target].color }}>{AGENT_BY_KEY[h.target].label}</b>
+                {h.status && TASK_STATUS_LABEL[h.status] && (
+                  <span className="font-pixel ml-2 text-[7px] text-[#6b5d52]">{TASK_STATUS_LABEL[h.status]}</span>
+                )}
                 <div className="text-[#4a3f38]">{h.instruction}</div>
               </li>
             ))}

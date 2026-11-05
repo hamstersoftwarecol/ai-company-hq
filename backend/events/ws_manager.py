@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 
 from fastapi import WebSocket
 from events.schemas import AgentEvent
@@ -7,6 +8,7 @@ from events.schemas import AgentEvent
 class WSManager:
     def __init__(self) -> None:
         self.active_connections: list[WebSocket] = []
+        self.listeners: list[Callable[[AgentEvent], None]] = []  # e.g. to keep /agents up to date
 
     async def connect(self, ws: WebSocket) -> None:
         self.active_connections.append(ws)
@@ -16,6 +18,8 @@ class WSManager:
             self.active_connections.remove(ws)
 
     async def broadcast(self, event: AgentEvent) -> None:
+        for listener in self.listeners:
+            listener(event)
         payload = event.model_dump_json()
         for ws in list(self.active_connections):
             try:

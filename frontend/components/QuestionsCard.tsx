@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import FolderPicker from "@/components/FolderPicker";
-import { sendAnswers } from "@/lib/api";
+import { cancelTask, sendAnswers } from "@/lib/api";
 import type { PendingQuestions } from "@/types/agent";
 
 interface Props {
@@ -29,6 +29,20 @@ export default function QuestionsCard({ pending, onAnswered }: Props) {
       onAnswered(pending.task_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo enviar las respuestas.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function cancel() {
+    if (sending) return;
+    setSending(true);
+    setError("");
+    try {
+      await cancelTask(pending.task_id);
+      onAnswered(pending.task_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cancelar la tarea.");
     } finally {
       setSending(false);
     }
@@ -84,9 +98,12 @@ export default function QuestionsCard({ pending, onAnswered }: Props) {
       )}
 
       {error && <p className="text-sm font-medium text-red-600">{error}</p>}
-      <div>
+      <div className="flex flex-wrap gap-3">
         <button type="button" onClick={submit} disabled={!canSend} className="px-btn">
           {sending ? "ENVIANDO…" : "RESPONDER Y EMPEZAR"}
+        </button>
+        <button type="button" onClick={cancel} disabled={sending} className="px-btn px-btn-ghost">
+          CANCELAR TAREA
         </button>
       </div>
     </div>

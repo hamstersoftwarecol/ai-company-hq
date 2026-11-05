@@ -22,7 +22,7 @@ from events.ws_manager import WSManager
 from crews.base_crew import BaseCrew
 from model_router.router import get_model_for_agent
 from mcp_servers.crew_server import get_server
-from orchestrator.clarify import FOLDER_QUESTION, clarifying_questions, format_answers
+from orchestrator.clarify import FOLDER_QUESTION, Cancelled, clarifying_questions, format_answers
 
 CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]
 
@@ -167,6 +167,11 @@ async def process_instruction(
                 output="Esperando tus respuestas…",
             )
             answers = await ask(questions)
+        except Cancelled:
+            await base.emit_event(
+                agent="ceo_agent", status="idle", task=instruction, output="Tarea cancelada.", model_used=model,
+            )
+            raise
         except Exception as exc:
             await base.emit_event(
                 agent="ceo_agent", status="error", task=instruction, output=str(exc), model_used=model,
