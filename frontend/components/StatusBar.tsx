@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { AgentState, CrewName } from "@/types/agent";
 
 interface Props {
@@ -16,7 +17,14 @@ export function StatusBar({ agentStates, isConnected }: Props) {
       <span className="text-xs text-gray-400">
         {activeCount > 0 ? `${activeCount} agente${activeCount > 1 ? "s" : ""} activo${activeCount > 1 ? "s" : ""}` : "Todos idle"}
       </span>
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex items-center gap-2">
+        <Link
+          href="/office"
+          className="text-xs px-2 py-0.5 rounded border border-indigo-500/40 text-indigo-400 hover:bg-indigo-500/20 transition-colors"
+          title="Entrar a la oficina 3D"
+        >
+          🏢 3D
+        </Link>
         <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-400" : "bg-red-500"}`} />
         <span className="text-xs text-gray-400">{isConnected ? "Conectado" : "Desconectado"}</span>
       </div>
