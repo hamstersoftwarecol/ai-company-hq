@@ -1,4 +1,4 @@
-import type { PendingQuestions } from "@/types/agent";
+import type { CustomAgent, PendingQuestions } from "@/types/agent";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -89,4 +89,47 @@ export async function fetchHistory(): Promise<ServerTask[]> {
   const res = await fetch(`${API_URL}/history`);
   if (!res.ok) return failWith(res);
   return res.json();
+}
+
+export async function listCustomAgents(): Promise<CustomAgent[]> {
+  const res = await fetch(`${API_URL}/custom-agents`);
+  if (!res.ok) return failWith(res);
+  return res.json();
+}
+
+export async function createCustomAgent(agent: { label: string; role: string; color: string }): Promise<CustomAgent> {
+  const res = await fetch(`${API_URL}/custom-agents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(agent),
+  });
+  if (!res.ok) return failWith(res);
+  return res.json();
+}
+
+export async function deleteCustomAgent(key: string): Promise<void> {
+  const res = await fetch(`${API_URL}/custom-agents/${encodeURIComponent(key)}`, { method: "DELETE" });
+  if (!res.ok) return failWith(res);
+}
+
+/** The folder every task is developed in, or null until the first plan is approved. */
+export async function getProject(): Promise<string | null> {
+  const res = await fetch(`${API_URL}/project`);
+  if (!res.ok) return failWith(res);
+  return (await res.json()).folder;
+}
+
+export async function setProject(folder: string): Promise<string> {
+  const res = await fetch(`${API_URL}/project`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder }),
+  });
+  if (!res.ok) return failWith(res);
+  return (await res.json()).folder;
+}
+
+export async function clearProject(): Promise<void> {
+  const res = await fetch(`${API_URL}/project`, { method: "DELETE" });
+  if (!res.ok) return failWith(res);
 }

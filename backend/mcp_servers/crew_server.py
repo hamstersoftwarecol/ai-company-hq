@@ -71,4 +71,13 @@ def _build_server() -> FastMCP:
         from crews.planning_crew import PlanningCrew
         return await PlanningCrew(ws_manager=_ws_manager, project_dir=_project(project_dir)).execute(task)
 
+    @mcp.tool(description="Run an agent created by the user (agent = its key) on a task.")
+    async def custom(agent: str, task: str, project_dir: str = "") -> str:
+        from crews.custom_crew import CustomCrew
+        from orchestrator.agents_registry import get_agent
+        found = get_agent(agent)
+        if found is None:
+            raise ValueError(f"Unknown agent: {agent}")
+        return await CustomCrew(found, ws_manager=_ws_manager, project_dir=_project(project_dir)).execute(task)
+
     return mcp

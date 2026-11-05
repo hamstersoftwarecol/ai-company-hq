@@ -73,3 +73,84 @@ def create_folder(parent: str, name: str) -> Path:
         raise ValueError("Escribe un nombre de carpeta válido (sin barras ni punto al inicio).")
     base = _browsable(parent)
     return resolve_project_dir(str(base / name))
+
+
+# ── The current project (asked once, remembered) ─────────────────────────────
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+from datetime import date
+
+PROJECT_PATH = Path(os.getenv("PROJECT_FILE", Path(__file__).resolve().parent.parent / "data" / "project.json"))
+
+
+def get_project() -> str | None:
+    """The folder of the current project, or None if none was chosen yet (or it is no longer valid)."""
+    try:
+        folder = json.loads(PROJECT_PATH.read_text()).get("folder")
+        return str(resolve_project_dir(folder)) if folder else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def set_project(folder: str) -> str:
+    """Remember `folder` (validated, created if missing) as the current project."""
+    path = resolve_project_dir(folder)
+    PROJECT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mktemp(dir=PROJECT_PATH.parent, suffix=".tmp"))
+    tmp.write_text(json.dumps({"folder": str(path)}))
+    tmp.replace(PROJECT_PATH)
+    return str(path)
+
+
+def clear_project() -> None:
+    PROJECT_PATH.unlink(missing_ok=True)
+
+
+def initialize_project(folder: str, instruction: str, plan: list[dict]) -> list[str]:
+    """Set up a new project folder: one subfolder per crew in the plan, a README with the
+    approved plan, and `git init` (unless the folder already is inside a repository).
+    Never overwrites anything. Returns what it did, in plain Spanish."""
+    root = Path(folder)
+    done: list[str] = []
+    crews = list(dict.fromkeys(str(item.get("crew", "")) for item in plan if item.get("crew")))
+    names = ["docs"] + [("docs" if c == "planning" else c) for c in crews]
+    created = []
+    for name in dict.fromkeys(names):
+        if not (root / name).exists():
+            (root / name).mkdir()
+            created.append(f"{name}/")
+    if created:
+        done.append("carpetas " + ", ".join(created))
+
+    readme = root / "README.md"
+    if not readme.exists():
+        lines = [
+            f"# {instruction.strip().splitlines()[0][:80] if instruction.strip() else 'Proyecto'}",
+            "",
+            f"> Proyecto creado con Mi Oficina Virtual · Hamster Software el {date.today().isoformat()}.",
+            "",
+            "## Objetivo",
+            "",
+            instruction.strip(),
+            "",
+            "## Plan aprobado",
+            "",
+            *[f"- **{item.get('crew')}**: {item.get('task')}" for item in plan],
+            "",
+        ]
+        readme.write_text("\n".join(lines))
+        done.append("README.md")
+
+    git = shutil.which("git")
+    if git and not (root / ".git").exists():
+        try:
+            inside = subprocess.run([git, "rev-parse", "--is-inside-work-tree"], cwd=root,
+                                    capture_output=True, timeout=15).returncode == 0
+            if not inside and subprocess.run([git, "init", "-q"], cwd=root, capture_output=True, timeout=15).returncode == 0:
+                done.append("repositorio git")
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return done

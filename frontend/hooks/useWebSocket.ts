@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { AgentEvent, AgentKey, AgentState, PendingQuestions } from "@/types/agent";
 import { fetchPending } from "@/lib/api";
 
@@ -10,11 +10,18 @@ const DEFAULT_STATES = Object.fromEntries(
   KEYS.map((k) => [k, { crew: k, status: "idle", currentTask: "", lastOutput: "", modelUsed: "" }])
 ) as Record<AgentKey, AgentState>;
 
-export function useWebSocket(url: string) {
+/** `extraKeys`: keys of the agents the user created (events of unknown agents are ignored). */
+export function useWebSocket(url: string, extraKeys: string[] = []) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [agentStates, setAgentStates] = useState<Record<AgentKey, AgentState>>(DEFAULT_STATES);
   const [isConnected, setIsConnected] = useState(false);
   const [pending, setPending] = useState<PendingQuestions[]>([]);
+  const knownRef = useRef<string[]>(KEYS);
+  const extraSignature = extraKeys.join(",");
+
+  useEffect(() => {
+    knownRef.current = [...KEYS, ...(extraSignature ? extraSignature.split(",") : [])];
+  }, [extraSignature]);
 
   useEffect(() => {
     // Everything lives inside the effect so a stale socket (React strict mode mounts
@@ -49,12 +56,12 @@ export function useWebSocket(url: string) {
             return;
           }
           const event: AgentEvent = data;
-          if (!KEYS.includes(event.crew as AgentKey)) return;
+          if (!knownRef.current.includes(event.crew)) return;
           setEvents((prev) => [...prev.slice(-199), event]);
           setAgentStates((prev) => ({
             ...prev,
             [event.crew]: {
-              crew: event.crew as AgentKey,
+              crew: event.crew,
               status: event.status,
               currentTask: event.task,
               lastOutput: event.output,

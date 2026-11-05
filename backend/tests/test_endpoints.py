@@ -32,16 +32,17 @@ async def test_post_task_returns_task_id():
 
 
 @pytest.mark.asyncio
-async def test_post_task_with_crew_dispatches_directly():
+async def test_post_task_with_crew_dispatches_directly(tmp_path, monkeypatch):
     from httpx import AsyncClient, ASGITransport
+    monkeypatch.setenv("HOME", str(tmp_path))
     with patch("main.dispatch_to_crew", new=AsyncMock(return_value="done")) as dispatch, \
-         patch("main.pending.ask", new=AsyncMock(return_value={"folder": "/home/x/proj"})):
+         patch("main.pending.ask", new=AsyncMock(return_value={"folder": "~/proj"})):
         from main import app
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post("/task", json={"instruction": "Diseña la API", "crew": "backend"})
         await asyncio.sleep(0.05)
     assert resp.status_code == 200
-    dispatch.assert_awaited_once_with("backend", "Diseña la API", "/home/x/proj")
+    dispatch.assert_awaited_once_with("backend", "Diseña la API", str(tmp_path.resolve() / "proj"))
 
 
 @pytest.mark.asyncio
@@ -109,3 +110,43 @@ async def test_folders_endpoints_list_and_create(tmp_path, monkeypatch):
         assert created.status_code == 200 and (tmp_path / "Documents" / "nuevo").is_dir()
         assert (await client.get("/folders", params={"path": "/etc"})).status_code == 400
         assert (await client.post("/folders", json={"parent": "~", "name": "a/b"})).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_custom_agents_endpoints_and_direct_task_to_one(tmp_path, monkeypatch):
+    from httpx import AsyncClient, ASGITransport
+    from main import app
+    monkeypatch.setenv("HOME", str(tmp_path))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        bad = await client.post("/custom-agents", json={"label": "", "role": "x", "color": "#112233"})
+        assert bad.status_code == 400
+        ok = await client.post("/custom-agents", json={"label": "Legal", "role": "Revisas contratos.", "color": "#112233"})
+        assert ok.status_code == 200 and ok.json()["key"] == "legal"
+        assert [a["key"] for a in (await client.get("/custom-agents")).json()] == ["legal"]
+        with patch("main.dispatch_to_crew", new=AsyncMock(return_value="done")), \
+             patch("main.pending.ask", new=AsyncMock(return_value={"folder": "~/p"})):
+            assert (await client.post("/task", json={"instruction": "x", "crew": "legal"})).status_code == 200
+            await asyncio.sleep(0.05)
+        assert (await client.delete("/custom-agents/legal")).status_code == 200
+        assert (await client.delete("/custom-agents/legal")).status_code == 404
+        assert (await client.post("/task", json={"instruction": "x", "crew": "legal"})).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_project_endpoints_and_second_task_runs_without_asking(tmp_path, monkeypatch):
+    from httpx import AsyncClient, ASGITransport
+    from main import app
+    monkeypatch.setenv("HOME", str(tmp_path))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/project")).json() == {"folder": None}
+        assert (await client.post("/project", json={"folder": "/etc"})).status_code == 400
+        folder = (await client.post("/project", json={"folder": "~/mi-app"})).json()["folder"]
+        assert (await client.get("/project")).json() == {"folder": folder}
+        ask = AsyncMock()
+        with patch("main.dispatch_to_crew", new=AsyncMock(return_value="done")) as dispatch, patch("main.pending.ask", new=ask):
+            await client.post("/task", json={"instruction": "hazlo", "crew": "backend"})
+            await asyncio.sleep(0.05)
+        ask.assert_not_awaited()
+        dispatch.assert_awaited_once_with("backend", "hazlo", folder)
+        assert (await client.delete("/project")).json() == {"folder": None}
+        assert (await client.get("/project")).json() == {"folder": None}

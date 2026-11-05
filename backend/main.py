@@ -16,10 +16,13 @@ from config import save_api_keys
 from events.ws_manager import ws_manager
 from orchestrator.ceo_agent import dispatch_to_crew, process_instruction
 from orchestrator.clarify import FOLDER_QUESTION, Cancelled, pending
-from orchestrator.project import create_folder, list_folders
+from orchestrator.agents_registry import add_agent, crew_names, delete_agent, list_agents
+from orchestrator.project import (
+    clear_project, create_folder, get_project, initialize_project, list_folders, set_project,
+)
 from mcp_servers.crew_server import get_server, set_ws_manager
 
-CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]
+CREW_NAMES = ["marketing", "frontend", "backend", "mobile", "images", "planning"]  # built-in crews
 
 
 ALLOWED_ORIGINS = [
@@ -65,7 +68,7 @@ def _update_task(task_id: str, **fields) -> None:
 
 def _track_agent_state(event) -> None:
     """Keep GET /agents in sync with the events the agents emit."""
-    if event.crew in agent_states:
+    if event.crew in agent_states or event.crew in crew_names():
         agent_states[event.crew] = {
             "crew": event.crew, "status": event.status, "currentTask": event.task,
             "lastOutput": event.output, "modelUsed": event.model_used,
@@ -103,6 +106,16 @@ _background_tasks: set[asyncio.Task] = set()
 class TaskRequest(BaseModel):
     instruction: str
     crew: str | None = None
+
+
+class NewAgentRequest(BaseModel):
+    label: str
+    role: str
+    color: str
+
+
+class ProjectRequest(BaseModel):
+    folder: str
 
 
 class NewFolderRequest(BaseModel):
@@ -158,7 +171,7 @@ async def get_history() -> list:
 
 @app.post("/task")
 async def post_task(body: TaskRequest) -> dict:
-    if body.crew is not None and body.crew not in CREW_NAMES:
+    if body.crew is not None and body.crew not in crew_names():
         raise HTTPException(status_code=400, detail=f"Unknown crew: {body.crew}")
     task_id = str(uuid.uuid4())
     # keep a reference: a bare asyncio.create_task() can be garbage-collected mid-run
@@ -166,6 +179,51 @@ async def post_task(body: TaskRequest) -> dict:
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return {"task_id": task_id}
+
+
+@app.get("/custom-agents")
+async def get_custom_agents() -> list:
+    return list_agents()
+
+
+@app.post("/custom-agents")
+async def post_custom_agent(body: NewAgentRequest) -> dict:
+    try:
+        return add_agent(body.label, body.role, body.color)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/custom-agents/{key}")
+async def delete_custom_agent(key: str) -> dict:
+    try:
+        delete_agent(key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Ese agente no existe.")
+    agent_states.pop(key, None)
+    return {"status": "deleted"}
+
+
+@app.get("/project")
+async def get_current_project() -> dict:
+    """The project folder every task is developed in (asked once, then remembered)."""
+    return {"folder": get_project()}
+
+
+@app.post("/project")
+async def post_project(body: ProjectRequest) -> dict:
+    """Choose (or change) the project folder without waiting for a task."""
+    try:
+        return {"folder": set_project(body.folder)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/project")
+async def delete_project() -> dict:
+    """Forget the current project: the next task starts a new one (plan + folder)."""
+    clear_project()
+    return {"folder": None}
 
 
 @app.get("/folders")
@@ -233,20 +291,27 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
 
 async def _run_task(task_id: str, instruction: str, crew: str | None = None) -> None:
+    folder = get_project()
     task_history.append({
-        "task_id": task_id, "instruction": instruction, "crew": crew, "status": "waiting",
+        "task_id": task_id, "instruction": instruction, "crew": crew,
+        # with a remembered project nothing is asked: it starts right away
+        "status": "running" if folder else "waiting", "folder": folder,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     _save_history()
     try:
         if crew:
-            # Direct assignment: ask for the project folder, then call that crew's MCP tool
-            answers = await pending.ask(task_id, instruction, [FOLDER_QUESTION], ws_manager)
-            result = await dispatch_to_crew(crew, instruction, answers["folder"])
+            if folder is None:
+                # Direct assignment to a new project: approve the plan and choose the folder once
+                plan = [{"crew": crew, "task": instruction}]
+                answers = await pending.ask(task_id, instruction, [FOLDER_QUESTION], ws_manager, plan=plan)
+                folder = set_project(answers["folder"])
+                initialize_project(folder, instruction, plan)
+            result = await dispatch_to_crew(crew, instruction, folder)
         else:
-            # CEO asks its questions (and the folder), then plans and dispatches crews via MCP tools
-            async def ask(questions: list[dict]) -> dict[str, str]:
-                return await pending.ask(task_id, instruction, questions, ws_manager)
+            # The CEO plans, asks the folder once (new project) and dispatches crews via MCP tools
+            async def ask(questions: list[dict], plan: list[dict]) -> dict[str, str]:
+                return await pending.ask(task_id, instruction, questions, ws_manager, plan=plan)
 
             result = await process_instruction(instruction, ws_manager, ask=ask)
         _update_task(task_id, status="complete", result=result[:500])

@@ -93,40 +93,82 @@ async def test_ceo_emits_error_when_every_crew_fails():
     assert _statuses(manager)[-1] == "error"
 
 
+@pytest.fixture
+def fake_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    return tmp_path
+
+
 @pytest.mark.asyncio
-async def test_ceo_asks_questions_then_works_in_the_chosen_folder():
+async def test_new_project_shows_plan_asks_folder_once_then_runs_the_plan(fake_home):
+    from orchestrator.project import get_project
     manager = AsyncMock(spec=WSManager)
     asked = {}
 
-    async def ask(questions):
-        asked["questions"] = questions
-        return {"q1": "Pymes de Colombia", "folder": "/home/u/proyecto"}
+    async def ask(questions, plan):
+        asked["questions"], asked["plan"] = questions, plan
+        return {"folder": "~/proyecto"}
 
     decisions = [
-        {"calls": [{"crew": "backend", "task": "api"}], "done": False, "summary": ""},
+        {"calls": [{"crew": "backend", "task": "api"}, {"crew": "frontend", "task": "ui"}], "done": False, "summary": ""},
         {"calls": [], "done": True, "summary": "ok"},
     ]
-    dispatch = AsyncMock(return_value="out")
     decide = AsyncMock(side_effect=decisions)
-    with patch("orchestrator.ceo_agent.clarifying_questions", AsyncMock(return_value=[{"id": "q1", "kind": "text", "question": "¿Público?"}])), \
-         patch("orchestrator.ceo_agent._decide", decide), \
-         patch("orchestrator.ceo_agent.dispatch_to_crew", dispatch):
+    dispatch = AsyncMock(return_value="out")
+    with patch("orchestrator.ceo_agent._decide", decide), patch("orchestrator.ceo_agent.dispatch_to_crew", dispatch):
         await process_instruction("Crear una app", manager, ask=ask)
 
-    assert [q["id"] for q in asked["questions"]] == ["q1", "folder"]          # folder is always asked
-    assert dispatch.call_args_list[0].args[2] == "/home/u/proyecto"           # crews work in that folder
-    assert "Pymes de Colombia" in decide.call_args_list[0].args[1]            # CEO sees the answers
+    folder = str(fake_home.resolve() / "proyecto")
+    assert [q["id"] for q in asked["questions"]] == ["folder"]                    # only the folder is asked
+    assert [(p["crew"], p["task"]) for p in asked["plan"]] == [("backend", "api"), ("frontend", "ui")]
+    assert get_project() == folder                                                # remembered
+    assert (fake_home / "proyecto" / "backend").is_dir() and (fake_home / "proyecto" / "README.md").exists()
+    assert {c.args[0] for c in dispatch.call_args_list} == {"backend", "frontend"}  # the approved plan ran
+    assert all(c.args[2] == folder for c in dispatch.call_args_list)
+    assert decide.call_count == 2          # round 1 reused the plan the user approved (no extra CEO call)
     assert _statuses(manager)[-1] == "complete"
 
 
 @pytest.mark.asyncio
-async def test_ceo_reports_error_if_the_questions_step_fails():
+async def test_next_task_in_the_same_project_does_not_ask_anything(fake_home):
+    from orchestrator.project import set_project
+    folder = set_project("~/proyecto")
+    manager = AsyncMock(spec=WSManager)
+    ask = AsyncMock()
+    dispatch = AsyncMock(return_value="out")
+    decisions = [{"calls": [{"crew": "backend", "task": "api"}], "done": False, "summary": ""},
+                 {"calls": [], "done": True, "summary": "ok"}]
+    with patch("orchestrator.ceo_agent._decide", AsyncMock(side_effect=decisions)), \
+         patch("orchestrator.ceo_agent.dispatch_to_crew", dispatch):
+        await process_instruction("Otra tarea", manager, ask=ask)
+    ask.assert_not_awaited()
+    assert dispatch.call_args_list[0].args[2] == folder
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_approval_returns_the_ceo_to_idle(fake_home):
+    from orchestrator.clarify import Cancelled
     manager = AsyncMock(spec=WSManager)
 
-    async def ask(questions):
-        raise RuntimeError("cancelado")
+    async def ask(questions, plan):
+        raise Cancelled("x")
 
-    with patch("orchestrator.ceo_agent.clarifying_questions", AsyncMock(return_value=[])):
-        with pytest.raises(RuntimeError, match="cancelado"):
+    decision = {"calls": [{"crew": "backend", "task": "api"}], "done": False, "summary": ""}
+    with patch("orchestrator.ceo_agent._decide", AsyncMock(return_value=decision)):
+        with pytest.raises(Cancelled):
             await process_instruction("x", manager, ask=ask)
-    assert _statuses(manager)[-1] == "error"
+    assert _statuses(manager)[-1] == "idle"
+
+
+@pytest.mark.asyncio
+async def test_ceo_can_dispatch_to_an_agent_created_by_the_user(fake_home):
+    from orchestrator.agents_registry import add_agent
+    add_agent("Legal", "Revisas contratos y términos de uso.", "#112233")
+    manager = AsyncMock(spec=WSManager)
+    dispatch = AsyncMock(return_value="out")
+    decisions = [{"calls": [{"crew": "legal", "task": "revisar T&C"}], "done": False, "summary": ""},
+                 {"calls": [], "done": True, "summary": "ok"}]
+    with patch("orchestrator.ceo_agent._decide", AsyncMock(side_effect=decisions)), \
+         patch("orchestrator.ceo_agent.dispatch_to_crew", dispatch):
+        await process_instruction("Revisar", manager, project_dir=str(fake_home))
+    assert dispatch.call_args_list[0].args[0] == "legal"

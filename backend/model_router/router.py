@@ -45,7 +45,7 @@ def _ollama_available() -> bool:
 
 
 def get_model_for_agent(agent_name: str) -> str:
-    tier = AGENT_TIER_MAP.get(agent_name, "local")
+    tier = AGENT_TIER_MAP.get(agent_name, "critical" if agent_name.startswith("custom_") else "local")
     if tier == "local" and not _ollama_available():
         return TIER_MODEL_MAP["standard"]
     return TIER_MODEL_MAP[tier]

@@ -57,3 +57,46 @@ def test_create_folder_and_rejects_bad_names(fake_home):
     for bad in ("", "  ", "a/b", "..", ".oculta", "x" * 101):
         with pytest.raises(ValueError):
             create_folder("~", bad)
+
+
+# ---- remembered project + initialisation ----------------------------------
+
+def test_project_is_remembered_and_can_be_cleared(fake_home):
+    from orchestrator.project import clear_project, get_project, set_project
+    assert get_project() is None
+    folder = set_project("~/Documents/app")
+    assert folder == str(fake_home.resolve() / "Documents" / "app") and get_project() == folder
+    clear_project()
+    assert get_project() is None
+
+
+def test_remembered_project_that_is_no_longer_valid_is_ignored(fake_home):
+    from orchestrator.project import PROJECT_PATH, get_project
+    PROJECT_PATH.write_text('{"folder": "/etc"}')
+    assert get_project() is None
+
+
+def test_initialize_project_creates_structure_readme_and_git_without_overwriting(fake_home):
+    import shutil
+    from orchestrator.project import initialize_project
+    root = fake_home / "app"
+    root.mkdir()
+    (root / "README.md").write_text("mío")
+    plan = [{"crew": "planning", "task": "roadmap"}, {"crew": "backend", "task": "api"}, {"crew": "backend", "task": "db"}]
+    done = initialize_project(str(root), "Crear una tienda en línea", plan)
+    assert (root / "docs").is_dir() and (root / "backend").is_dir() and not (root / "planning").exists()
+    assert (root / "README.md").read_text() == "mío"            # never overwritten
+    assert any("carpetas" in d for d in done)
+    if shutil.which("git"):
+        assert (root / ".git").is_dir() and "repositorio git" in done
+    # second call is a no-op
+    assert initialize_project(str(root), "otra", plan) == []
+
+
+def test_initialize_project_writes_readme_with_the_approved_plan(fake_home):
+    from orchestrator.project import initialize_project
+    root = fake_home / "nuevo"
+    root.mkdir()
+    initialize_project(str(root), "Tienda en línea\nCon pagos", [{"crew": "backend", "task": "API de pagos"}])
+    text = (root / "README.md").read_text()
+    assert text.startswith("# Tienda en línea") and "**backend**: API de pagos" in text

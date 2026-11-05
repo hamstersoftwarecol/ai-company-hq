@@ -1,7 +1,7 @@
 "use client";
 
 import type { AgentEvent, AgentKey, AgentState, AgentStatus } from "@/types/agent";
-import { AGENTS, AGENT_BY_KEY } from "@/lib/office";
+import { agentMap, MAX_CUSTOM_AGENTS, UNKNOWN_AGENT, type OfficeAgent } from "@/lib/office";
 
 export interface HistoryEntry {
   id: string;
@@ -47,16 +47,25 @@ function Chip({ status }: { status: AgentStatus }) {
 }
 
 interface Props {
+  agents: OfficeAgent[];
   agentStates: Record<AgentKey, AgentState>;
   selected: AgentKey;
   onSelect: (key: AgentKey) => void;
   events: AgentEvent[];
   history: HistoryEntry[];
+  onNewAgent: () => void;
+  onDeleteAgent: (key: AgentKey) => void;
 }
 
-export default function ControlPanel({ agentStates, selected, onSelect, events, history }: Props) {
-  const agent = AGENT_BY_KEY[selected];
-  const st = agentStates[selected];
+const IDLE: AgentState = { crew: "", status: "idle", currentTask: "", lastOutput: "", modelUsed: "" };
+
+export default function ControlPanel({
+  agents, agentStates, selected, onSelect, events, history, onNewAgent, onDeleteAgent,
+}: Props) {
+  const byKey = agentMap(agents);
+  const agent = byKey[selected] ?? UNKNOWN_AGENT;
+  const st = agentStates[selected] ?? IDLE;
+  const customCount = agents.filter((a) => a.slot !== undefined).length;
   const recent = [...events].reverse().slice(0, 8);
 
   return (
@@ -73,6 +82,17 @@ export default function ControlPanel({ agentStates, selected, onSelect, events, 
           <Chip status={st.status} />
         </div>
         <p className="mt-2 text-sm text-[#6b5d52]">{agent.role}</p>
+        {agent.slot !== undefined && (
+          <button
+            type="button"
+            className="px-btn px-btn-ghost mt-2"
+            onClick={() => {
+              if (window.confirm(`¿Borrar al agente ${agent.label}? Se quita de la oficina.`)) onDeleteAgent(agent.key);
+            }}
+          >
+            BORRAR AGENTE
+          </button>
+        )}
 
         <dl className="mt-3 space-y-2 text-sm">
           <div>
@@ -102,8 +122,8 @@ export default function ControlPanel({ agentStates, selected, onSelect, events, 
       <section className="px-panel p-3">
         <h2 className="font-pixel mb-2 text-[10px]">EQUIPO</h2>
         <ul className="grid grid-cols-2 gap-2">
-          {AGENTS.map((a) => {
-            const s = agentStates[a.key].status;
+          {agents.map((a) => {
+            const s = (agentStates[a.key] ?? IDLE).status;
             const active = a.key === selected;
             return (
               <li key={a.key}>
@@ -126,6 +146,15 @@ export default function ControlPanel({ agentStates, selected, onSelect, events, 
             );
           })}
         </ul>
+        <button
+          type="button"
+          onClick={onNewAgent}
+          disabled={customCount >= MAX_CUSTOM_AGENTS}
+          className="px-btn px-btn-ghost mt-3 w-full"
+          title={customCount >= MAX_CUSTOM_AGENTS ? "No queda sitio en la oficina: borra algún agente propio." : undefined}
+        >
+          + NUEVO AGENTE ({customCount}/{MAX_CUSTOM_AGENTS})
+        </button>
       </section>
 
       {/* Live activity */}
@@ -138,7 +167,7 @@ export default function ControlPanel({ agentStates, selected, onSelect, events, 
             {recent.map((e) => (
               <li key={e.event_id} className="border-l-4 bg-[#faf6ee] px-2 py-1 text-xs" style={{ borderColor: STATUS_COLOR[e.status] }}>
                 <span className="font-mono text-[#9a8d80]">{e.timestamp.slice(11, 19)}</span>{" "}
-                <b>{AGENT_BY_KEY[e.crew as AgentKey]?.label ?? e.crew}</b>{" "}
+                <b>{byKey[e.crew]?.label ?? e.crew}</b>{" "}
                 <span className="text-[#6b5d52]">{e.agent} · {STATUS_LABEL[e.status].toLowerCase()}</span>
               </li>
             ))}
@@ -156,7 +185,7 @@ export default function ControlPanel({ agentStates, selected, onSelect, events, 
             {history.slice(0, 8).map((h) => (
               <li key={h.id} className="bg-[#faf6ee] px-2 py-1.5 text-xs">
                 <span className="font-mono text-[#9a8d80]">{h.ts}</span>{" "}
-                <b style={{ color: AGENT_BY_KEY[h.target].color }}>{AGENT_BY_KEY[h.target].label}</b>
+                <b style={{ color: (byKey[h.target] ?? UNKNOWN_AGENT).color }}>{byKey[h.target]?.label ?? h.target}</b>
                 {h.status && TASK_STATUS_LABEL[h.status] && (
                   <span className="font-pixel ml-2 text-[7px] text-[#6b5d52]">{TASK_STATUS_LABEL[h.status]}</span>
                 )}

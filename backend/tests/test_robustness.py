@@ -38,9 +38,9 @@ async def test_cancel_endpoint_marks_task_cancelled(tmp_path, monkeypatch):
     main.task_history.clear()
     ask_started = asyncio.Event()
 
-    async def fake_ask(task_id, instruction, questions, ws):
+    async def fake_ask(task_id, instruction, questions, ws, plan=None):
         ask_started.set()
-        return await real_ask(task_id, instruction, questions, ws)
+        return await real_ask(task_id, instruction, questions, ws, plan=plan)
 
     real_ask = main.pending.ask
     monkeypatch.setattr(main.pending, "ask", fake_ask)

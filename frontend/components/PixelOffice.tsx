@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { AgentKey, AgentState, AgentStatus } from "@/types/agent";
-import { AGENTS, OFFICE_H, OFFICE_W, type OfficeAgent } from "@/lib/office";
+import { OFFICE_H, OFFICE_W, type OfficeAgent } from "@/lib/office";
 
 // ── Light "game" palette ───────────────────────────────────────────────────
 const P = {
@@ -246,6 +246,7 @@ function drawUnit(
 // ── Scene ──────────────────────────────────────────────────────────────────
 function drawScene(
   ctx: Ctx,
+  agents: OfficeAgent[],
   states: Record<AgentKey, AgentState>,
   selected: AgentKey | null,
   t: number
@@ -289,24 +290,28 @@ function drawScene(
   plant(ctx, 120, 48);
   sofa(ctx, 8, 84, 30, 16);
 
-  // lounge
-  pingPong(ctx, 12, 140, t);
-  bookshelf(ctx, 104, 138);
-  plant(ctx, 120, 178);
-  sofa(ctx, 8, 212, 52, 22);
-  box(ctx, 72, 220, 14, 14, "#ffffff", P.metalDark);
-  R(ctx, 75, 223, 8, 8, "#f08a24");
+  // lounge: its decor makes room for the desks of the agents the user creates
+  const taken = new Set(agents.filter((a) => a.slot !== undefined).map((a) => a.slot));
+  if (!taken.has(0)) pingPong(ctx, 12, 140, t);
+  if (!taken.has(1)) bookshelf(ctx, 104, 138);
+  if (!taken.has(1) && !taken.has(3)) plant(ctx, 120, 178);
+  if (!taken.has(2)) sofa(ctx, 8, 212, 52, 22);
+  if (!taken.has(3)) {
+    box(ctx, 72, 220, 14, 14, "#ffffff", P.metalDark);
+    R(ctx, 75, 223, 8, 8, "#f08a24");
+  }
 
   // meeting room
   meetingRoom(ctx, t);
   plant(ctx, 366, 218);
 
   // desks + people
-  AGENTS.forEach((a, i) => drawUnit(ctx, a, states[a.key]?.status ?? "idle", selected === a.key, t, i));
+  agents.forEach((a, i) => drawUnit(ctx, a, states[a.key]?.status ?? "idle", selected === a.key, t, i));
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
 interface Props {
+  agents: OfficeAgent[];
   agentStates: Record<AgentKey, AgentState>;
   selected: AgentKey | null;
   onSelect: (key: AgentKey) => void;
@@ -326,15 +331,17 @@ const STATUS_ES: Record<AgentStatus, string> = {
   idle: "libre",
 };
 
-export default function PixelOffice({ agentStates, selected, onSelect }: Props) {
+export default function PixelOffice({ agents, agentStates, selected, onSelect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const agentsRef = useRef(agents);
   const statesRef = useRef(agentStates);
   const selectedRef = useRef(selected);
   // Keep the animation loop's refs in sync (refs must not be written during render)
   useEffect(() => {
+    agentsRef.current = agents;
     statesRef.current = agentStates;
     selectedRef.current = selected;
-  }, [agentStates, selected]);
+  }, [agents, agentStates, selected]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -346,7 +353,7 @@ export default function PixelOffice({ agentStates, selected, onSelect }: Props) 
       raf = requestAnimationFrame(loop);
       if (ms - last < 33) return;
       last = ms;
-      drawScene(ctx, statesRef.current, selectedRef.current, ms / 1000);
+      drawScene(ctx, agentsRef.current, statesRef.current, selectedRef.current, ms / 1000);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
@@ -364,7 +371,7 @@ export default function PixelOffice({ agentStates, selected, onSelect }: Props) 
         className="absolute inset-0 h-full w-full"
         style={{ imageRendering: "pixelated" }}
       />
-      {AGENTS.map((a) => {
+      {agents.map((a) => {
         const st = agentStates[a.key]?.status ?? "idle";
         const b = BUBBLE[st];
         const w = a.key === "orchestrator" ? 72 : 56;
