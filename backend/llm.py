@@ -3,12 +3,17 @@ Lightweight LLM dispatcher — replaces litellm for Python 3.15 compatibility.
 Dispatches to the right SDK based on model prefix.
 """
 
+import asyncio
+import json
 import os
+import tempfile
 from typing import Any
 
 
 async def acompletion(model: str, messages: list[dict[str, str]], **kwargs: Any) -> Any:
     """Call an LLM and return an object with .choices[0].message.content."""
+    if os.environ.get("LLM_PROVIDER", "").strip().lower() == "claude-code":
+        return await _call_claude_code(model, messages, **kwargs)
     if model.startswith("claude"):
         return await _call_anthropic(model, messages, **kwargs)
     elif model.startswith("gpt") or model.startswith("openai/"):
@@ -78,3 +83,61 @@ async def _call_ollama(model: str, messages: list[dict], **kwargs: Any) -> _Resp
         }) as resp:
             data = await resp.json()
             return _Response(data["message"]["content"])
+
+
+_CLAUDE_CODE_TIMEOUT = 300
+
+
+async def _call_claude_code(model: str, messages: list[dict], **kwargs: Any) -> _Response:
+    """Run the prompt through the local Claude Code CLI (`claude -p`).
+
+    Uses the user's Claude login instead of an Anthropic API key, so it works
+    without API credits. Enabled with LLM_PROVIDER=claude-code. Every model name
+    is served by Claude: names starting with "claude" are passed through, any
+    other (gpt-4o, ollama/...) falls back to CLAUDE_CODE_MODEL (default "sonnet").
+    """
+    system = "You are a helpful assistant."
+    turns: list[str] = []
+    for m in messages:
+        if m["role"] == "system":
+            system = m["content"]
+        else:
+            turns.append(m["content"])
+    prompt = "\n\n".join(turns)
+
+    cli_model = model if model.startswith("claude") else os.environ.get("CLAUDE_CODE_MODEL", "sonnet")
+    cmd = [
+        os.environ.get("CLAUDE_CODE_BIN", "claude"), "-p",
+        "--output-format", "json",
+        "--model", cli_model,
+        "--system-prompt", system,
+        "--tools", "",
+        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+        "--disable-slash-commands", "--no-session-persistence",
+        "--setting-sources", "",
+    ]
+    # The CLI must use the Claude login, never the (possibly empty) API key,
+    # and must run outside the project so it does not load its .mcp.json.
+    env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            cwd=tempfile.gettempdir(), env=env,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("No se encontró el comando `claude`. Instala Claude Code e inicia sesión.") from exc
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=_CLAUDE_CODE_TIMEOUT)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise RuntimeError(f"Claude Code no respondió en {_CLAUDE_CODE_TIMEOUT}s")
+
+    text = out.decode(errors="replace").strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"Claude Code falló: {(err.decode(errors='replace') or text)[:500]}")
+    if proc.returncode != 0 or data.get("is_error"):
+        raise RuntimeError(f"Claude Code falló: {str(data.get('result') or err.decode(errors='replace'))[:500]}")
+    return _Response(str(data.get("result", "")))

@@ -86,6 +86,17 @@ DEFAULT_LOCAL_MODEL=llama3.2
 DEFAULT_REMOTE_MODEL=claude-sonnet-5-5
 ```
 
+**Sin créditos de API: usar tu sesión de Claude Code**
+
+Si no tienes saldo en la API de Anthropic, puedes hacer que todos los agentes piensen a través del CLI de [Claude Code](https://claude.com/claude-code) con tu cuenta de Claude. Instálalo, inicia sesión con `claude` y añade esto a `backend/.env`:
+
+```bash
+LLM_PROVIDER=claude-code
+CLAUDE_CODE_MODEL=sonnet   # modelo para los agentes que no son "claude-*"; opcional
+```
+
+Con eso las llamadas van por `claude -p` (sin herramientas, sin MCP y fuera del proyecto) y **ignoran** `ANTHROPIC_API_KEY`. Todos los agentes usan Claude, incluidos los que el enrutador asignaría a GPT-4o u Ollama. Reinicia el backend después de cambiarlo.
+
 Si la cabecera dice **SIN CONEXIÓN**, el backend no está corriendo en el puerto 8000. Si un agente termina en error con un mensaje sobre saldo, tu cuenta de Anthropic necesita créditos.
 
 ## Usar los equipos desde Claude Code
